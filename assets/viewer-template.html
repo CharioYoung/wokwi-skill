@@ -47,9 +47,15 @@
     border:1px dashed #d7e0ee;padding:6px;overflow:hidden}
   .pcb-svg{width:100%;height:440px;display:block}
   .pcbwrap.big .pcb-svg{height:auto}
-  .pcb-pinlab{font:5px/1 Helvetica,Arial;fill:#c3cdd9;font-weight:600;letter-spacing:-.05px}
-  .pcb-wire{cursor:help;transition:stroke-width .12s}
+  /* Unused pins stay dim, used pins brighten: same silkscreen, different ink. */
+  .pcb-pinlab{font:5px/1 Helvetica,Arial;fill:#7f8a96;font-weight:600;letter-spacing:-.05px}
+  .pcb-pinlab.used{fill:#e8eef6}
+  /* No help cursor on wires: the browser draws a "?" beside the arrow, which
+     reads as an error. Hover feedback is the thickened stroke instead. */
+  .pcb-wire{transition:stroke-width .12s}
   .pcb-wire:hover{stroke-width:3.6}
+  .pcb-pin{cursor:default}
+  .pcb-pin:hover{fill:rgba(34,211,238,.22);stroke:#22d3ee;stroke-width:.7}
   .pcb-part{cursor:pointer}
   .pcb-tools{position:absolute;right:10px;top:10px;display:flex;gap:6px;z-index:3}
   .pcb-tools button{border:1px solid var(--line);background:#ffffffee;border-radius:8px;font-size:11px;
@@ -352,9 +358,13 @@ void loop() {
  * API
  *   var v = PcbView.render(diagramObjectOrJsonText, opts)
  *     opts.brightness : { partId: 0..1 }   LED brightness (0 = off)
- *     opts.labels     : true               print pin names as silkscreen
+ *     opts.labels     : true               print all pin names as silkscreen
  *     opts.pins       : true               outline the pins that are used
- *   returns { svg, viewBox, wires, parts, audit:{wires, crossings, offenders} }
+ *     opts.hints      : true               hover hotspot on every pin (tooltip
+ *                                          says the name and what it feeds)
+ *     opts.i18n       : { unused: '未使用' } word used by the hint for a free pin
+ *   returns { svg, viewBox, wires, parts, pins:{used,total},
+ *             audit:{wires, crossings, offenders} }
  *
  *   PcbView.setBrightness(root, partId, value)   cheap live update
  *   PcbView.audit(diagram)                        geometry self-check
@@ -475,10 +485,12 @@ var PcbView = (function () {
     g.push('<rect x="38" y="' + num(uy) + '" width="31" height="15" rx="1.6" fill="#c8ccd1" stroke="#8d9297" stroke-width=".9"/>');
     g.push('<rect x="43" y="' + num(uy + 3) + '" width="21" height="5.5" rx="1" fill="#3a3f45"/>');
 
-    /* EN / BOOT buttons, kept clear of the shield so the labels stay legible */
-    [[BH - 42, 'EN'], [BH - 28, 'BOOT']].forEach(function (b) {
-      g.push('<rect x="86" y="' + num(b[0]) + '" width="11" height="9" rx="1.2" fill="#e6e8ea" stroke="#9aa0a6" stroke-width=".8"/>');
-      g.push('<text x="83" y="' + num(b[0] + 6) + '" font-family="Helvetica,Arial" font-size="4.2" fill="#8b9299" text-anchor="end">' + b[1] + '</text>');
+    /* EN / BOOT buttons. They sit left of the right-hand silkscreen gutter
+       (labels are anchored at bx1-9 and grow leftwards, so anything past x=83
+       would print straight through D1 / D0 / CLK). */
+    [[BH - 44, 'EN'], [BH - 30, 'BOOT']].forEach(function (b) {
+      g.push('<rect x="70" y="' + num(b[0]) + '" width="10" height="9" rx="1.2" fill="#e6e8ea" stroke="#9aa0a6" stroke-width=".8"/>');
+      g.push('<text x="67" y="' + num(b[0] + 6) + '" font-family="Helvetica,Arial" font-size="4.2" fill="#8b9299" text-anchor="end">' + b[1] + '</text>');
     });
     g.push('<text x="52" y="92" font-family="Helvetica,Arial" font-size="4.8" fill="#6b7280" text-anchor="middle">ESP32-DevKitC V4</text>');
 
@@ -749,6 +761,8 @@ var PcbView = (function () {
     var bright = opts.brightness || {};
     var showLabels = opts.labels !== false;
     var showPins = opts.pins !== false;
+    var hints = opts.hints !== false;
+    var unusedWord = (opts.i18n && opts.i18n.unused) || 'unused';
     var board = null, i;
     for (i = 0; i < dia.parts.length; i++) if (isBoard(dia.parts[i].type)) board = dia.parts[i];
     if (!board) throw new Error('diagram.json has no board part (type board-esp32-*)');
@@ -781,27 +795,36 @@ var PcbView = (function () {
       return '';
     });
 
-    /* pin names as silkscreen, only for pins the circuit actually uses */
-    var labels = [], used = {}, labelW = 0;
+    /* Which header pins the circuit touches, and what each one feeds. Built
+       from the connections alone, so it stays true when diagram.json changes. */
+    var used = {}, pinLinks = {};
+    (dia.connections || []).forEach(function (c2) {
+      var refs = [c2[0], c2[1]];
+      refs.forEach(function (ref, ix) {
+        if (String(ref).charAt(0) === '$') return;
+        var k = String(ref).indexOf(':');
+        if (k < 0) return;
+        var pid = ref.slice(0, k), nm = ref.slice(k + 1);
+        if (!index[pid] || !isBoard(index[pid].type)) return;
+        used[pid + ':' + nm] = 1;
+        (pinLinks[nm] || (pinLinks[nm] = [])).push(String(refs[1 - ix]));
+      });
+    });
+
+    /* Pin names as silkscreen - ALL of them, the way a real DevKitC is printed.
+       Only the used ones are brightened, which is what draws the eye; hiding
+       the rest made "what is this empty pin?" unanswerable. */
+    var labels = [];
     if (showLabels) {
-      (dia.connections || []).forEach(function (c2) {
-        [c2[0], c2[1]].forEach(function (ref) {
-          if (String(ref).charAt(0) === '$') return;
-          var k = String(ref).indexOf(':');
-          if (k < 0) return;
-          var pid = ref.slice(0, k), nm = ref.slice(k + 1);
-          if (!index[pid] || !isBoard(index[pid].type)) return;
-          if (used[pid + ':' + nm]) return;
-          used[pid + ':' + nm] = 1;
-          var pl = pinsOf(index[pid]);
-          if (!pl[nm]) return;
-          var xy = router.absPin(ref);
-          labelW = Math.max(labelW, nm.length * 3.1);
-          var isLeft = LEFT.indexOf(nm) >= 0;
-          labels.push('<text x="' + num(isLeft ? bx0 + 9.0 : bx1 - 9.0) +
-            '" y="' + num(xy[1] + 1.6) + '" class="pcb-pinlab" paint-order="stroke" stroke="#1a1a1a" stroke-width="1.5" stroke-linejoin="round" text-anchor="' +
-            (isLeft ? 'start' : 'end') + '">' + esc(nm) + '</text>');
-        });
+      LEFT.concat(RIGHT).forEach(function (nm) {
+        var xy = router.absPin(board.id + ':' + nm);
+        if (!xy) return;
+        var isLeft = LEFT.indexOf(nm) >= 0;
+        labels.push('<text x="' + num(isLeft ? bx0 + 9.0 : bx1 - 9.0) +
+          '" y="' + num(xy[1] + 1.6) + '" class="pcb-pinlab' +
+          (used[board.id + ':' + nm] ? ' used' : '') +
+          '" paint-order="stroke" stroke="#1a1a1a" stroke-width="1.5" stroke-linejoin="round" text-anchor="' +
+          (isLeft ? 'start' : 'end') + '">' + esc(nm) + '</text>');
       });
     }
     if (showPins) {
@@ -809,6 +832,23 @@ var PcbView = (function () {
         var xy = router.absPin(k);
         if (xy) labels.push('<circle cx="' + num(xy[0]) + '" cy="' + num(xy[1]) +
           '" r="1.9" fill="none" stroke="#22d3ee" stroke-width=".7" opacity=".9"/>');
+      });
+    }
+
+    /* Hover hotspot on every pin, used or not. r is under half the 9.5 pitch so
+       neighbouring targets never fight. fill must be "transparent" rather than
+       "none": an unfilled shape does not receive pointer events at all. */
+    var hot = [];
+    if (hints) {
+      LEFT.concat(RIGHT).forEach(function (nm) {
+        var xy = router.absPin(board.id + ':' + nm);
+        if (!xy) return;
+        var links = pinLinks[nm];
+        var tip = nm + ' \u00b7 ' +
+          (links ? '\u2192 ' + links.join(', ') : '(' + unusedWord + ')');
+        hot.push('<circle class="pcb-pin" cx="' + num(xy[0]) + '" cy="' + num(xy[1]) +
+          '" r="4.3" fill="transparent" data-pin="' + esc(nm) + '">' +
+          '<title>' + esc(tip) + '</title></circle>');
       });
     }
 
@@ -836,6 +876,7 @@ var PcbView = (function () {
       bodies.join('') +
       '<g class="pcb-wires">' + wires.join('') + '</g>' +
       '<g class="pcb-labels">' + labels.join('') + '</g>' +
+      '<g class="pcb-hints">' + hot.join('') + '</g>' +
       '</svg>';
 
     return {
@@ -843,6 +884,7 @@ var PcbView = (function () {
       viewBox: [vx, vy, vw, vh],
       wires: routed.length,
       parts: dia.parts.length,
+      pins: { used: Object.keys(used).length, total: LEFT.length + RIGHT.length },
       audit: audit(dia, routed)
     };
   }

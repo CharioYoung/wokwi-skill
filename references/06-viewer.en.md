@@ -140,8 +140,11 @@ Wires are always **orthogonal polylines**. They leave a pin, step clear of the b
 
 - **LED brightness** follows page state via `PcbView.setBrightness(host, partId, 0..1)`; a PWM project just feeds `duty/255`;
 - clicking a lamp in the drawing switches to that lamp's manual mode;
-- hovering a wire shows `from -> to` (SVG `<title>`);
+- hovering **any pin** (used or not) shows `pin · -> target`, and a free pin shows `pin · (unused)`; the pad lights up with a cyan ring while hovered;
+- hovering a **wire** shows `from -> to` (SVG `<title>`) and thickens it. **Do not put `cursor: help` on wires** — the browser then paints a question mark beside the arrow and users read it as an error (this already happened);
 - the "zoom" button widens the drawing to the full column so the pin names are readable.
+
+All 38 pin names are printed, the way a real DevKitC is silkscreened; the pins the circuit uses are brighter and carry a cyan ring. Printing only the used ones made people ask "what are all those empty pins?"
 
 ### 3.4 Things not to do
 

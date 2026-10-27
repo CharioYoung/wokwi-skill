@@ -13,12 +13,16 @@
  *   wires      connections that resolved to real pins and got routed
  *   dangling   connections whose endpoints are not known pins (skipped, not drawn)
  *   crossings  segments that overlap the board footprint (must be 0)
+ *   pins       hover hotspots / total header pins (must match - an unhoverable
+ *              pin gives no name, and the user is left guessing what it is)
+ *   tips       hotspots with an empty <title> (must be 0)
  *
  * Usage:
  *   node check_circuit.js                 # every diagram.json under examples/
  *   node check_circuit.js <dir> [<dir>]   # specific project directories
  *
- * Exit code: 0 = clean, 1 = a wire crosses the board or no diagram was found.
+ * Exit code: 0 = clean, 1 = a wire crosses the board, a pin has no tooltip,
+ *            or no diagram was found.
  */
 
 const fs = require('fs');
@@ -82,12 +86,22 @@ for (const f of files) {
      that is not a problem. Only a *real* part with an unknown pin is. */
   const virtual = conns.filter((c) => String(c[0]).charAt(0) === '$' || String(c[1]).charAt(0) === '$').length;
   const unknown = conns.length - virtual - v.wires;
-  const ok = v.audit.crossings === 0 && unknown === 0;
+
+  /* Every pin must be answerable on hover. Silkscreen is printed for all of
+     them, but the pointer target is what actually answers "what is this pin?",
+     and it is easy to lose that while editing the renderer. */
+  const hotspots = v.svg.match(/class="pcb-pin"/g) || [];
+  const emptyTips = (v.svg.match(/<title>\s*<\/title>/g) || []).length;
+  const pinOk = hotspots.length === v.pins.total && emptyTips === 0;
+
+  const ok = v.audit.crossings === 0 && unknown === 0 && pinOk;
   console.log(
     `  ${ok ? '[OK]  ' : '[FAIL]'} ${label}: parts=${v.parts} wires=${v.wires}/${conns.length - virtual}` +
       (virtual ? ` +${virtual} virtual` : '') +
       (unknown ? ` ${unknown} UNRESOLVED` : '') +
-      ` crossings=${v.audit.crossings}`
+      ` crossings=${v.audit.crossings}` +
+      ` pins=${hotspots.length}/${v.pins.total} (${v.pins.used} wired)` +
+      (pinOk ? '' : ' PIN-HINT-MISSING')
   );
   if (!ok) {
     for (const o of v.audit.offenders) {
@@ -103,5 +117,5 @@ if (bad) {
   console.log('        not a cosmetic one: fix the router or move the part in diagram.json.');
   process.exit(1);
 }
-console.log('RESULT: OK - no wire crosses a board footprint');
+console.log('RESULT: OK - no wire crosses the board, every pin names itself on hover');
 console.log('');
