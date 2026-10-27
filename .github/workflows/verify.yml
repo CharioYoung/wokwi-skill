@@ -36,6 +36,14 @@ jobs:
           set -e
           node scripts/verify_viewer.js examples/traffic-light
           node scripts/verify_viewer.js examples/remote-switch
+          node scripts/sync_embed.js examples/traffic-light --check
+          node scripts/sync_embed.js examples/remote-switch --check
+
+      - name: Circuit renderer is identical in every page
+        run: node scripts/sync_pcbview.js --check
+
+      - name: Circuit geometry (no wire across the board)
+        run: node scripts/check_circuit.js
 
       - name: Viewer runtime smoke test
         run: |

@@ -1,6 +1,6 @@
 # 06 · Result viewer: turning a headless simulation into a page you can see and click
 
-[中文](06-viewer.en.md) | **English**
+[中文](06-viewer.md) | **English**
 
 ## Why it exists
 
@@ -12,7 +12,7 @@
 
 So the most reliable way to "let a human see and interact with it" is: **drive a local HTML page with the real serial log**, then open it with `present_files`.
 
-It is not a fake animation: the timing, states and values on the page all come from the real simulation log, and the drawing area is explicitly labelled "schematic, not a Wokwi render" so it never impersonates a screenshot.
+The timing, states and values on the page all come from the real simulation log. The circuit picture is not decoration either: it is **rendered from `diagram.json`** (section 3), so the drawing cannot disagree with how the circuit is actually wired.
 
 ---
 
@@ -24,18 +24,32 @@ It is not a fake animation: the timing, states and values on the page all come f
 <script type="text/plain" id="diaSrc">   full diagram.json source
 </script>
 <script>
+/* === PCB-VIEW BEGIN ===  circuit renderer (generated from scripts/pcbview.js - do not edit here)
+   PcbView.render(diagram, {brightness}) -> {svg, audit} */
+/* === PCB-VIEW END === */
+</script>
+<script>
 function rawSrc(id){ ... }
 const INO = rawSrc("inoSrc");
 const DIA = rawSrc("diaSrc");
 
 const CFG = { name, actors[], sequence[], selection[], rawLog };   // <- must come before the renderer
 
-/* renderers: buildTower / setOne / setState / runAuto / log /
+/* page logic: drawPcb / setOne / setState / runAuto / log /
    renderNetlist / showTab / copyFile / boot */
 </script>
 ```
 
 `assets/viewer-template.html` already has this structure — copy it.
+
+**Two sync tools (never copy by hand):**
+
+| Command | What it does |
+|---|---|
+| `node scripts/sync_embed.js <projectDir>` | writes the real `.ino` / `diagram.json` into the page's two `text/plain` blocks |
+| `node scripts/sync_pcbview.js` | writes `scripts/pcbview.js` into the PCB-VIEW block of every page |
+
+Both accept `--check` (verify only); that is what CI runs. Pasting a `.ino` by hand has already caused one incident (a trimmed "demo" build produced `selfTest was not declared`), so the tool owns that step.
 
 ---
 
@@ -95,7 +109,49 @@ selection: [
 
 ---
 
-## 3. The four hard rules (each paid for in blood)
+## 3. The circuit picture is rendered, not drawn
+
+The first version was a CSS mock ("a grey box plus three bulbs"). It looked fine but had **no pin names and no wires**, which makes it an illustration: you cannot check a connection against it, and it never explains why GPIO25 drives the red LED. It is now rendered from `diagram.json`.
+
+### 3.1 Where the data comes from
+
+| What | Source |
+|---|---|
+| part `top` / `left` / `attrs` | the project's own `diagram.json` |
+| LED and resistor outline plus pin positions | Wokwi's open-source `@wokwi/elements` (MIT) |
+| resistor colour bands | the official colour table, computed from `value` (`330` -> orange-orange-brown) |
+| 9.5-unit header pitch | reverse-engineered from the 19 pin `y` values in the official part; it equals the real 2.54 mm |
+| wire endpoints and colours | read from `connections`; green = signal, black = GND |
+
+The board outline is drawn here: the open-source package only ships the 30-pin `esp32-devkit-v1`, while diagrams use the 38-pin `board-esp32-devkit-c-v4`, so the board is rebuilt on the real 2.54 mm header grid.
+
+### 3.2 Routing rules
+
+Wires are always **orthogonal polylines**. They leave a pin, step clear of the board, then run outside it — **never across the PCB**:
+
+- both ends on the same header side -> simple Z shape;
+- one end on a header, the other outside on the same side -> step straight out;
+- ends on opposite sides -> wrap around the nearer horizontal edge, each wire taking its own lane so they never stack into one thick band;
+- vertical runs are also given a channel count derived from the free space (`VMAX`), so a dense diagram tightens up instead of ploughing through the parts beside the board.
+
+`PcbView.render()` returns `audit.crossings` as a hard number: a Liang-Barsky segment/rectangle test flags every segment that overlaps the board footprint (except the pin's own short stub). CI runs this, and a non-zero count fails the build.
+
+### 3.3 Interaction
+
+- **LED brightness** follows page state via `PcbView.setBrightness(host, partId, 0..1)`; a PWM project just feeds `duty/255`;
+- clicking a lamp in the drawing switches to that lamp's manual mode;
+- hovering a wire shows `from -> to` (SVG `<title>`);
+- the "zoom" button widens the drawing to the full column so the pin names are readable.
+
+### 3.4 Things not to do
+
+- **Do not hand-edit the drawing for one project.** It follows `diagram.json`; editing it by hand means lying.
+- **Do not hand-edit the PCB-VIEW block.** It is generated from `scripts/pcbview.js`; edit that and run `node scripts/sync_pcbview.js`.
+- The element library currently covers the ESP32 board, `wokwi-led` and `wokwi-resistor`. To add a button, servo or OLED, add that part's pin coordinates to `pinsOf()`; an unknown part returns `{}`, so its wires are skipped rather than drawn in the wrong place.
+
+---
+
+## 4. The four hard rules (each paid for in blood)
 
 ### Hard rule 1: it must be the verbatim source that actually compiled
 
@@ -178,7 +234,7 @@ It really executes `boot()` in a fake DOM and reports lamp count, netlist charac
 
 ---
 
-## 4. Adapting to different project types
+## 5. Adapting to different project types
 
 | Project type | What to change |
 |---|---|
@@ -191,7 +247,7 @@ It really executes `boot()` in a fake DOM and reports lamp count, netlist charac
 
 ---
 
-## 5. The four anti-black-box sections that must be present
+## 6. The four anti-black-box sections that must be present
 
 Built into the template — do not delete them:
 
@@ -200,11 +256,11 @@ Built into the template — do not delete them:
 3. **Direct link to a blank project** — opens `https://wokwi.com/projects/new/esp32`. Explain that Wokwi has no "run code from a URL" API, so a new project is always blank and pasting is required.
 4. **Selection rationale table** — `CFG.selection`, one row per "requirement → choice → reason".
 
-The drawing area must be labelled **"schematic (drawn from diagram.json, not rendered by Wokwi)"** so nobody mistakes it for a Wokwi screenshot.
+The drawing area must state its **data source**; the template says "rendered live from diagram.json, with real pins and wires". That is true (section 3), but it must not be read as "rendered by Wokwi" — this is not Wokwi's rendering engine and there is no live electrical simulation behind it.
 
 ---
 
-## 6. Interaction design principles
+## 7. Interaction design principles
 
 - clicking a button **immediately** changes the picture and appends a log line at the same time (equivalent to the firmware receiving a command);
 - keep both "auto" and "manual" modes and show the current state plus remaining time / reading;
@@ -213,7 +269,7 @@ The drawing area must be labelled **"schematic (drawn from diagram.json, not ren
 
 ---
 
-## 7. Pre-delivery checklist
+## 8. Pre-delivery checklist
 
 - [ ] `verify_viewer.js` reports `INO identical ... [PASS]` and `DIA identical ... [PASS]`
 - [ ] `domrun.js` reports `errors: 0`
@@ -221,12 +277,12 @@ The drawing area must be labelled **"schematic (drawn from diagram.json, not ren
 - [ ] netlist and selection tables are non-empty
 - [ ] the serial panel content equals the real `serial.log` in the project
 - [ ] no leftover debug output of `CFG` / `DIA` / `rawSrc`
-- [ ] the drawing area is labelled "schematic"
+- [ ] the drawing area states its data source (rendered from diagram.json, not the Wokwi engine)
 - [ ] no token anywhere on the page
 
 ---
 
-## 8. Common failures
+## 9. Common failures
 
 | Symptom | Cause | Fix |
 |---|---|---|

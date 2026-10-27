@@ -141,7 +141,10 @@ wokwi-skill/
 │   ├── compile.ps1 / compile.sh # parameterised build (ASCII path avoidance)
 │   ├── simulate.ps1 / .sh       # run a simulation + assert on key log lines
 │   ├── verify_viewer.js         # viewer code consistency + compilability check
-│   └── domrun.js                # fake-DOM runtime check (catches undefined crashes)
+│   ├── domrun.js                # fake-DOM runtime check (catches undefined crashes)
+│   ├── pcbview.js               # circuit renderer: diagram.json -> real board/pins/wires
+│   ├── sync_pcbview.js          # inline pcbview.js into every page (--check for CI)
+│   └── sync_embed.js            # write the real .ino / diagram.json into a page (--check for CI)
 ├── assets/
 │   └── viewer-template.html     # config-driven result viewer template
 └── examples/

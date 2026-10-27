@@ -1,6 +1,6 @@
 # 02 · Environment setup (Windows / macOS / Linux)
 
-[中文](02-environment.en.md) | **English**
+[中文](02-environment.md) | **English**
 
 Goal: make `check-env` all green. Takes about 20–40 minutes, most of it spent downloading the ESP32 core (~300 MB).
 

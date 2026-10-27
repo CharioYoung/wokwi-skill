@@ -12,7 +12,7 @@
 
 所以"让人看到效果并交互"的最稳方案是：**用真实串口日志驱动一个本地 HTML**，再用 `present_files` 弹出来。
 
-它不是"假动画"：页面里的时序、状态、数值全部来自真实仿真日志；图形区明确标注"示意图，非 Wokwi 渲染"，不冒充截图。
+它不是"假动画"：页面里的时序、状态、数值全部来自真实仿真日志。电路图也不是手画的装饰——它**直接解析 `diagram.json` 渲染**（见第 3 节），所以不会出现"图和实际接法对不上"的情况。
 
 ---
 
@@ -24,18 +24,32 @@
 <script type="text/plain" id="diaSrc">   完整 diagram.json 原文
 </script>
 <script>
+/* === PCB-VIEW BEGIN ===  电路渲染器（由 scripts/pcbview.js 生成，勿手改）
+   PcbView.render(diagram, {brightness}) -> {svg, audit} */
+/* === PCB-VIEW END === */
+</script>
+<script>
 function rawSrc(id){ ... }
 const INO = rawSrc("inoSrc");
 const DIA = rawSrc("diaSrc");
 
 const CFG = { name, actors[], sequence[], selection[], rawLog };   // ← 必须在渲染器之前
 
-/* 渲染器：buildTower / setOne / setState / runAuto / log /
+/* 页面逻辑：drawPcb / setOne / setState / runAuto / log /
    renderNetlist / showTab / copyFile / boot */
 </script>
 ```
 
 `assets/viewer-template.html` 就是这套结构，复制即可用。
+
+**两个同步工具（别手抄）：**
+
+| 命令 | 作用 |
+|---|---|
+| `node scripts/sync_embed.js <项目目录>` | 把真实 `.ino` / `diagram.json` 写进页面的两个 `text/plain` 块 |
+| `node scripts/sync_pcbview.js` | 把 `scripts/pcbview.js` 写进所有页面的 PCB-VIEW 块 |
+
+两者都支持 `--check`（只校验不写），CI 就跑这个模式。手抄一次 `.ino` 就出过事故（贴了"精简展示版"导致 `selfTest was not declared`），所以这一步交给工具。
 
 ---
 
@@ -95,7 +109,49 @@ selection: [
 
 ---
 
-## 3. 四条铁律（血泪换来的）
+## 3. 电路图是"渲染"出来的，不是画的
+
+早期版本用 CSS 拼了一张"灰盒子 + 三个灯泡"，看着还行，但**没有引脚名、没有连线**，等于一张插图：既没法核对接法，也解释不了"为什么 GPIO25 接红灯"。现在改为由 `diagram.json` 实时渲染。
+
+### 3.1 数据从哪来
+
+| 内容 | 来源 |
+|---|---|
+| 元件 `top` / `left` / `attrs` | 项目自己的 `diagram.json` |
+| LED、电阻的外形与引脚位置 | Wokwi 官方开源库 `@wokwi/elements`（MIT） |
+| 电阻色环 | 官方色码表按 `value` 现算（`330` → 橙-橙-棕） |
+| 排针间距 9.5 单位 | 官方元件里 19 个引脚的 `y` 值反推，等于真实 2.54 mm |
+| 连线端点与线色 | `connections` 逐条读；绿 = 信号，黑 = GND |
+
+开发板是画出来的：开源库只有 30 脚的 `esp32-devkit-v1`，而 diagram 用的是 38 脚 `board-esp32-devkit-c-v4`，所以板框按真实 2.54 mm 排针网格重建。
+
+### 3.2 走线规则
+
+导线一律**正交折线**，从引脚先垂直出板，再绕到板外走线，**绝不横穿 PCB**：
+
+- 两端都在同一侧排针 → 简单 Z 形；
+- 一端在排针、另一端在板外且同侧 → 直接拐出去；
+- 两端分居两侧 → 从最近的水平边绕过去，每条线占一条独立轨道（`lanes`），避免叠成一根粗线；
+- 竖直线段也按"可用空隙"分配通道数（`VMAX`），密集的图会自动收敛而不是撞到旁边的元件。
+
+`PcbView.render()` 返回的 `audit.crossings` 是硬指标：用 Liang-Barsky 求交逐段检查，任何一段线压到板框（除引脚自身那一小段引线）都会被计数。CI 里就有这一步，`crossings != 0` 直接失败。
+
+### 3.3 交互
+
+- **LED 亮度**由页面状态驱动：`PcbView.setBrightness(host, partId, 0..1)`，PWM 项目直接喂 `duty/255`；
+- 点图上的灯 = 切到该灯的手动模式；
+- 悬停导线显示 `起点 → 终点`（`<title>`）；
+- 「放大」按钮把图放大到整栏宽度，方便看引脚名。
+
+### 3.4 不要做的事
+
+- **不要为某个项目手改这张图**。图跟着 `diagram.json` 变，改图等于骗人。
+- **不要手改页面里的 PCB-VIEW 块**。它由 `scripts/pcbview.js` 生成，改完跑 `node scripts/sync_pcbview.js`。
+- 元件库目前覆盖 ESP32 开发板、`wokwi-led`、`wokwi-resistor`。要加按键/舵机/OLED，在 `pinsOf()` 里补上该元件的引脚坐标即可（空元件的 `pinsOf` 返回 `{}`，对应的线会被跳过而不是画错）。
+
+---
+
+## 4. 四条铁律（血泪换来的）
 
 ### 铁律 1：必须是"实际编译通过的原文"
 
@@ -178,7 +234,7 @@ node scripts/domrun.js <项目目录>/sim-viewer.html
 
 ---
 
-## 4. 适配不同类型项目
+## 5. 适配不同类型项目
 
 | 项目类型 | 改什么 |
 |---|---|
@@ -191,7 +247,7 @@ node scripts/domrun.js <项目目录>/sim-viewer.html
 
 ---
 
-## 5. 必带的四块"反黑盒"内容
+## 6. 必带的四块"反黑盒"内容
 
 模板已内置，别删：
 
@@ -200,11 +256,11 @@ node scripts/domrun.js <项目目录>/sim-viewer.html
 3. **直达空白工程** —— 打开 `https://wokwi.com/projects/new/esp32`。说明 Wokwi 没有"URL 带代码直接运行"的接口，新工程必空白、必须粘贴。
 4. **选型决策表** —— `CFG.selection`，逐条写"需求点 → 选型 → 理由"。
 
-图形区必须标注：**「示意图（据 diagram.json 绘制，非 Wokwi 渲染）」**，不要让人误以为是从 Wokwi 截的图。
+图形区要标注**数据来源**：现在的模板写的是「由 diagram.json 实时渲染，含真实引脚与连线」。这句话是真的（见第 3 节），但也别让它被读成"Wokwi 官方渲染"——它不是 Wokwi 的渲染引擎，没有实时电气仿真。
 
 ---
 
-## 6. 交互设计原则
+## 7. 交互设计原则
 
 - 点按钮 → **立即**改变画面 + 同时往串口区写一行日志（等价于固件收到命令）；
 - 保留"自动/手动"两种模式，显示当前状态与剩余时间/读数；
@@ -213,7 +269,7 @@ node scripts/domrun.js <项目目录>/sim-viewer.html
 
 ---
 
-## 7. 交付前检查清单
+## 8. 交付前检查清单
 
 - [ ] `verify_viewer.js` 输出 `INO match real file: true`、`DIA match real file: true`
 - [ ] `domrun.js` 输出 `错误数: 0`
@@ -221,12 +277,12 @@ node scripts/domrun.js <项目目录>/sim-viewer.html
 - [ ] 连接表、选型表非空
 - [ ] 串口区内容 = 项目里真实 `serial.log` 内容
 - [ ] 页面里没有 `CFG` / `DIA` / `rawSrc` 的临时调试输出
-- [ ] 图形区标注了"示意图"
+- [ ] 图形区标注了数据来源（由 diagram.json 渲染，非 Wokwi 引擎）
 - [ ] 没有把 token 写进页面
 
 ---
 
-## 8. 常见故障
+## 9. 常见故障
 
 | 现象 | 原因 | 修复 |
 |---|---|---|

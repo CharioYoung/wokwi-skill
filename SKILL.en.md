@@ -111,13 +111,19 @@ So the acceptance criterion is always **an assertion on the serial log**, never 
 wokwi-cli is headless, does not create web projects, and cannot capture the whole canvas. The most reliable way to let the user "see and operate" it is a local viewer:
 
 1. Copy `assets/viewer-template.html` → `<project-dir>/sim-viewer.html`.
-2. Edit `CFG` (actors / sequence / selection / rawLog) and the two raw text blocks following `references/06-viewer.en.md`.
-3. **Three checks are mandatory**:
+2. Edit `CFG` (actors / sequence / selection / rawLog) following `references/06-viewer.en.md`.
+3. **Do not paste the two raw text blocks by hand** — let the tool write them:
+   ```bash
+   node scripts/sync_embed.js <project-dir>     # real .ino / diagram.json -> the page's text/plain blocks
+   ```
+4. **The circuit picture is not something you draw**: the PCB-VIEW block parses `diagram.json` and renders the real board, pins and wires, with LED brightness driven by page state, click-to-switch, and hover-to-identify wires. To change the renderer, edit `scripts/pcbview.js` and run `node scripts/sync_pcbview.js`.
+5. **Three checks are mandatory**:
    ```bash
    node scripts/verify_viewer.js <project-dir>              # code byte-identical to the real files + JS syntax
    node scripts/domrun.js <project-dir>/sim-viewer.html     # fake DOM really runs boot(); error count must be 0
+   node scripts/check_circuit.js <project-dir>              # circuit geometry: no wire may cut across the board
    ```
-4. Open the preview with `present_files`.
+6. Open the preview with `present_files`.
 
 **Four hard rules for the viewer (each learned the hard way — break one and it explodes)**:
 

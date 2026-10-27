@@ -1,6 +1,6 @@
 # 08 · Two complete worked examples
 
-[中文](08-examples.en.md) | **English**
+[中文](08-examples.md) | **English**
 
 Both examples live under `examples/` and are **fully runnable sets** (`.ino` + `diagram.json` + `wokwi.toml` + `sim-viewer.html`).
 

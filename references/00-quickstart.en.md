@@ -1,6 +1,6 @@
 # 00 · Get through the first run in ten minutes
 
-[中文](00-quickstart.en.md) | **English**
+[中文](00-quickstart.md) | **English**
 
 This document gives **someone who has never touched Wokwi or a dev board** the shortest possible path. When you finish it you will know: what this thing actually does, what to type first, and how to tell whether it worked.
 

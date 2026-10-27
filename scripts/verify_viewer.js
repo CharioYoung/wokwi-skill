@@ -207,10 +207,22 @@ if (doCompile) {
         warn('arduino-cli not found, skipped compile');
       } else {
         const dataDir = process.env.ARDUINO_DATA_DIR || 'C:/wokwi-toolchain/data';
-        const work = path.join(os.tmpdir(), 'wokwi-verify-src');
+        // The sketch directory must be ASCII too, not just the build directory.
+        // A Chinese (or any non-ASCII) user name puts os.tmpdir() under
+        // C://Users//<name>//AppData//..., and arduino-cli's toolchain then fails
+        // with obscure errors. Fall back to a sibling of the build dir.
+        let workBase = os.tmpdir();
+        if (/[^\x00-\x7F]/.test(workBase)) {
+          const sibling = path.dirname(buildDir);
+          workBase = /[^\x00-\x7F]/.test(sibling) ? 'C:/wokwi-tmp' : sibling;
+          console.log(`  temp dir is non-ASCII, using ${workBase} for the sketch`);
+        }
+        // arduino-cli requires the parent directory to be named exactly like
+        // the .ino file, otherwise it reports "main file missing from sketch".
+        const name = path.basename(inoPath).replace(/\.ino$/, '');
+        const work = path.join(workBase, name);
         fs.rmSync(work, { recursive: true, force: true });
         fs.mkdirSync(work, { recursive: true });
-        const name = path.basename(inoPath).replace(/\.ino$/, '');
         const sketchPath = path.join(work, name + '.ino');
         fs.writeFileSync(sketchPath, inoOut, 'utf8');
         if (diaOut) fs.writeFileSync(path.join(work, 'diagram.json'), diaOut, 'utf8');
@@ -224,6 +236,12 @@ if (doCompile) {
           { encoding: 'utf8' }
         );
         const out = (r.stdout || '') + (r.stderr || '');
+        if (r.error) {
+          fail(`could not start arduino-cli (${r.error.code || r.error.message})`);
+          console.log(`         ARDUINO_CLI=${cli}`);
+          console.log('         point ARDUINO_CLI at the real executable, e.g. C:/tools/arduino-cli/arduino-cli.exe');
+          return;
+        }
         const used = /Sketch uses (\d+) bytes/.exec(out);
         const binPath = path.join(buildDir, name + '.ino.bin');
         const binOk = fs.existsSync(binPath) && fs.statSync(binPath).size > 0;

@@ -1,6 +1,6 @@
 # 03 · Part selection: from requirement to bill of materials
 
-[中文](03-hardware-selection.en.md) | **English**
+[中文](03-hardware-selection.md) | **English**
 
 The output of selection must be a **three-column table**, which finally lands in the viewer's `CFG.selection`:
 

@@ -1,6 +1,6 @@
 # 07 · Error encyclopaedia (traps we actually hit)
 
-[中文](07-troubleshooting.en.md) | **English**
+[中文](07-troubleshooting.md) | **English**
 
 The triage order is always: **read the first error → decide which layer it belongs to → change only that layer**.
 

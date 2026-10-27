@@ -111,13 +111,19 @@ powershell -ExecutionPolicy Bypass -File scripts/simulate.ps1 -Project <项目�
 wokwi-cli 无头、不建网页工程、截不到全景。让用户"看到并操作"的最稳方案是本地查看器：
 
 1. 复制 `assets/viewer-template.html` → `<项目目录>/sim-viewer.html`。
-2. 按 `references/06-viewer.md` 改 `CFG`（actors / sequence / selection / rawLog）与两个原始文本块。
-3. **必须做三重校验**：
+2. 按 `references/06-viewer.md` 改 `CFG`（actors / sequence / selection / rawLog）。
+3. **两个原始文本块不要手抄**，用工具写：
+   ```bash
+   node scripts/sync_embed.js <项目目录>      # 真实 .ino / diagram.json → 页面的 text/plain 块
+   ```
+4. **电路图不用画**：页面里的 PCB-VIEW 块直接解析 `diagram.json` 渲染真实板卡/引脚/连线，支持 LED 亮度驱动、点灯切换、悬停看连线。要改渲染器只改 `scripts/pcbview.js`，再 `node scripts/sync_pcbview.js` 同步。
+5. **必须做三重校验**：
    ```bash
    node scripts/verify_viewer.js <项目目录>     # 代码与真实文件逐字节一致 + JS 语法
    node scripts/domrun.js <项目目录>/sim-viewer.html   # 假 DOM 真跑 boot()，错误数必须为 0
+   node scripts/check_circuit.js <项目目录>    # 电路几何：没有线横穿板子（crossings 必须 0）
    ```
-4. 用 `present_files` 弹出预览。
+6. 用 `present_files` 弹出预览。
 
 **查看器四条铁律（血泪换来的，违反必炸）**：
 

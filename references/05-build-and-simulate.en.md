@@ -1,6 +1,6 @@
 # 05 · Build and simulate: really getting the firmware to run
 
-[中文](05-build-and-simulate.en.md) | **English**
+[中文](05-build-and-simulate.md) | **English**
 
 This document covers two things: **how to turn an `.ino` into firmware**, and **how to run it in Wokwi and bring the evidence back**.
 

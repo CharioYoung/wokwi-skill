@@ -140,7 +140,10 @@ wokwi-skill/
 │   ├── compile.ps1 / compile.sh # 参数化编译（ASCII 路径规避）
 │   ├── simulate.ps1 / .sh       # 跑仿真 + 断言关键日志
 │   ├── verify_viewer.js         # 查看器代码一致性 + 可编译性校验
-│   └── domrun.js                # 假 DOM 运行时校验（抓 undefined 崩）
+│   ├── domrun.js                # 假 DOM 运行时校验（抓 undefined 崩）
+│   ├── pcbview.js               # 电路渲染器：diagram.json → 真实板卡/引脚/连线
+│   ├── sync_pcbview.js          # 把 pcbview.js 内联进所有页面（--check 供 CI）
+│   └── sync_embed.js            # 把真实 .ino / diagram.json 写进页面（--check 供 CI）
 ├── assets/
 │   └── viewer-template.html     # 配置驱动的结果查看器模板
 └── examples/

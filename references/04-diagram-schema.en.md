@@ -1,6 +1,6 @@
 # 04 · `diagram.json` quick reference (read before writing)
 
-[中文](04-diagram-schema.en.md) | **English**
+[中文](04-diagram-schema.md) | **English**
 
 `diagram.json` is the single description of the circuit. Wokwi draws the board and wires from it, and the simulator computes electrical connections from it. **One wrong character and a part does not appear or a wire does not connect.**
 

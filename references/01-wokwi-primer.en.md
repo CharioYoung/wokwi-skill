@@ -1,6 +1,6 @@
 # 01 · From zero: Wokwi, dev boards and circuits
 
-[中文](01-wokwi-primer.en.md) | **English**
+[中文](01-wokwi-primer.md) | **English**
 
 This document assumes you have **never connected a wire or written a line of microcontroller code**. After reading it you will be able to follow the project the AI generates — and judge whether it is making things up.
 
