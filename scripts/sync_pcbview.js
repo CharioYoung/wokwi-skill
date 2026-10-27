@@ -26,11 +26,19 @@ const SRC = path.join(ROOT, 'scripts', 'pcbview.js');
 const BEGIN = '/* === PCB-VIEW BEGIN: generated from scripts/pcbview.js - edit that file, not this block === */';
 const END = '/* === PCB-VIEW END === */';
 
-const TARGETS = [
-  'examples/traffic-light/sim-viewer.html',
-  'examples/remote-switch/sim-viewer.html',
-  'assets/viewer-template.html',
-];
+/* Every viewer, discovered rather than listed: a new example must not be able
+   to ship with a stale renderer just because someone forgot to add it here. */
+const TARGETS = (() => {
+  const out = ['assets/viewer-template.html'];
+  const ex = path.join(ROOT, 'examples');
+  if (fs.existsSync(ex)) {
+    for (const d of fs.readdirSync(ex)) {
+      const f = path.join(ex, d, 'sim-viewer.html');
+      if (fs.existsSync(f)) out.push('examples/' + d + '/sim-viewer.html');
+    }
+  }
+  return out;
+})();
 
 const check = process.argv.includes('--check');
 const body = fs.readFileSync(SRC, 'utf8').replace(/\s+$/, '');

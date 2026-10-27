@@ -117,40 +117,74 @@ The first version was a CSS mock ("a grey box plus three bulbs"). It looked fine
 
 | What | Source |
 |---|---|
-| part `top` / `left` / `attrs` | the project's own `diagram.json` |
-| LED and resistor outline plus pin positions | Wokwi's open-source `@wokwi/elements` (MIT) |
+| part `top` / `left` / `attrs` / `rotate` | the project's own `diagram.json` |
+| LED, resistor and servo outline plus pin positions | Wokwi's open-source `@wokwi/elements` (MIT) |
 | resistor colour bands | the official colour table, computed from `value` (`330` -> orange-orange-brown) |
 | 9.5-unit header pitch | reverse-engineered from the 19 pin `y` values in the official part; it equals the real 2.54 mm |
-| wire endpoints and colours | read from `connections`; green = signal, black = GND |
+| the Mega's 85 pin coordinates | the official `arduino-mega-element` `pinInfo`, copied verbatim into `MEGA_PINS` |
+| wire endpoints and colours | read from `connections`; green = signal, red = V+, black = GND |
 
-The board outline is drawn here: the open-source package only ships the 30-pin `esp32-devkit-v1`, while diagrams use the 38-pin `board-esp32-devkit-c-v4`, so the board is rebuilt on the real 2.54 mm header grid.
+The board outline is drawn here: the open-source package only ships the 30-pin `esp32-devkit-v1`, while diagrams use the 38-pin `board-esp32-devkit-c-v4`, so the board is rebuilt on the real 2.54 mm header grid. A board only has to enter the `BOARDS` registry to work; there are two today:
+
+```js
+'traffic-light', 'remote-switch'  ->  board-esp32-devkit-c-v4   (38 pins)
+'servo-ring'                      ->  wokwi-arduino-mega        (85 pins)
+```
+
+**An unknown board throws instead of guessing an outline:**
+
+```js
+throw new Error('diagram.json has no supported board. Known: ... ' +
+  'Add one to BOARDS in pcbview.js (pin coordinates are in @wokwi/elements) instead of guessing.');
+```
 
 ### 3.2 Routing rules
 
-Wires are always **orthogonal polylines**. They leave a pin, step clear of the board, then run outside it — **never across the PCB**:
+Wires are always **orthogonal polylines**. They leave a pin, step clear of the part, then run outside the board — **never across the PCB**:
 
-- both ends on the same header side -> simple Z shape;
 - one end on a header, the other outside on the same side -> step straight out;
 - ends on opposite sides -> wrap around the nearer horizontal edge, each wire taking its own lane so they never stack into one thick band;
+- both ends outside the board (the chained servo V+/GND runs) -> propose ten standard bends, measure how much of each would land on the PCB with Liang-Barsky, and keep the one that crosses least and is then shortest;
 - vertical runs are also given a channel count derived from the free space (`VMAX`), so a dense diagram tightens up instead of ploughing through the parts beside the board.
 
-`PcbView.render()` returns `audit.crossings` as a hard number: a Liang-Barsky segment/rectangle test flags every segment that overlaps the board footprint (except the pin's own short stub). CI runs this, and a non-zero count fails the build.
+Three hard rules, all forced out by a real project:
+
+1. **Measure the turn from the board edge, not from the pin.** The Mega's digital header is a double column and its inner column sits 13 units inside the edge; measuring "pin plus a gap" put the turn inside the footprint, and the vertical run then slid across the PCB along the header.
+2. **A pin in the inner column has to lead out past the edge.** `out = min(ox - depth, bx0 - depth)` — take whichever of "from the pin" and "from the edge" is further out.
+3. **A wire between two off-board parts cannot just be an L.** "Left-side servo to right-side servo V+" always cuts the board as an L; it has to wrap over the top or bottom edge.
+
+`PcbView.render()` returns `audit` as the hard numbers:
+
+| Field | Meaning | Requirement |
+|---|---|---|
+| `wires` | connections resolved and drawn | equals `connections` minus the virtual ones |
+| `crossings` | segments overlapping the board footprint (Liang-Barsky, segment by segment) | **must be 0** |
+| `leads` | segments overlapping the board whose endpoint is a pin itself | not part of the verdict, reported only |
+| `mode` | `avoid` (default) / `direct` | - |
+
+Why `leads` is not an error: when a part sits on the board edge — which the 32-servo ring does at every corner — its pin coordinate is **inside the footprint**, so the wire can only start on the PCB. That is a layout fact, not a routing choice.
+
+`route:'direct'` is the escape hatch: step 14 units out of the pin and join orthogonally without avoiding the board. It exists for boards whose pins face up or down, which `avoid` does not model. **Do not use it on a dense diagram** — the 32-servo ring gets 21 segments across the PCB with `direct`, and 0 with the default `avoid`.
 
 ### 3.3 Interaction
 
 - **LED brightness** follows page state via `PcbView.setBrightness(host, partId, 0..1)`; a PWM project just feeds `duty/255`;
+- **servo angle**: `PcbView.setAngle` turns one horn without redrawing the diagram, and `PcbView.hornTransform(deg)` gives the `transform`; 32 servos updating dozens of times a second still hold frame rate;
 - clicking a lamp in the drawing switches to that lamp's manual mode;
 - hovering **any pin** (used or not) shows `pin · -> target`, and a free pin shows `pin · (unused)`; the pad lights up with a cyan ring while hovered;
 - hovering a **wire** shows `from -> to` (SVG `<title>`) and thickens it. **Do not put `cursor: help` on wires** — the browser then paints a question mark beside the arrow and users read it as an error (this already happened);
 - the "zoom" button widens the drawing to the full column so the pin names are readable.
 
-All 38 pin names are printed, the way a real DevKitC is silkscreened; the pins the circuit uses are brighter and carry a cyan ring. Printing only the used ones made people ask "what are all those empty pins?"
+Every pin name is printed, the way a real board is silkscreened; the pins the circuit uses are brighter and carry a cyan ring. Printing only the used ones made people ask "what are all those empty pins?"
+
+A double-row header needs special treatment or every name lands on a pad: the columns are only 10 units apart and a pad is 6.8 wide, so there is no gutter for text. **The inner column is named inboard of itself, the outer one in the margin inside the board edge.**
 
 ### 3.4 Things not to do
 
 - **Do not hand-edit the drawing for one project.** It follows `diagram.json`; editing it by hand means lying.
 - **Do not hand-edit the PCB-VIEW block.** It is generated from `scripts/pcbview.js`; edit that and run `node scripts/sync_pcbview.js`.
-- The element library currently covers the ESP32 board, `wokwi-led` and `wokwi-resistor`. To add a button, servo or OLED, add that part's pin coordinates to `pinsOf()`; an unknown part returns `{}`, so its wires are skipped rather than drawn in the wrong place.
+- **Do not move parts in `diagram.json` just to make a diagram reach `crossings=0`.** The drawing has to match the real simulation; move a part and it is no longer the same circuit. (The one exception is a part parked 7 units inside the board — an obvious data defect handled by `nudge()`, and the viewer has to say so.)
+- The element library currently covers the ESP32 board, the Arduino Mega, `wokwi-led`, `wokwi-resistor` and `wokwi-servo`. To add a button or an OLED, add that part's pin coordinates to `pinsOf()`; an unknown part returns `{}`, so its wires are skipped rather than drawn in the wrong place.
 
 ---
 

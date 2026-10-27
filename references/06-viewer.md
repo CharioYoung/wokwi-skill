@@ -117,40 +117,74 @@ selection: [
 
 | 内容 | 来源 |
 |---|---|
-| 元件 `top` / `left` / `attrs` | 项目自己的 `diagram.json` |
-| LED、电阻的外形与引脚位置 | Wokwi 官方开源库 `@wokwi/elements`（MIT） |
+| 元件 `top` / `left` / `attrs` / `rotate` | 项目自己的 `diagram.json` |
+| LED、电阻、舵机的外形与引脚位置 | Wokwi 官方开源库 `@wokwi/elements`（MIT） |
 | 电阻色环 | 官方色码表按 `value` 现算（`330` → 橙-橙-棕） |
 | 排针间距 9.5 单位 | 官方元件里 19 个引脚的 `y` 值反推，等于真实 2.54 mm |
-| 连线端点与线色 | `connections` 逐条读；绿 = 信号，黑 = GND |
+| Mega 的 85 个引脚坐标 | 官方 `arduino-mega-element` 的 `pinInfo` 原样搬进 `MEGA_PINS` |
+| 连线端点与线色 | `connections` 逐条读；绿 = 信号，红 = V+，黑 = GND |
 
-开发板是画出来的：开源库只有 30 脚的 `esp32-devkit-v1`，而 diagram 用的是 38 脚 `board-esp32-devkit-c-v4`，所以板框按真实 2.54 mm 排针网格重建。
+开发板是画出来的：开源库只有 30 脚的 `esp32-devkit-v1`，而 diagram 用的是 38 脚 `board-esp32-devkit-c-v4`，所以板框按真实 2.54 mm 排针网格重建。板卡进 `BOARDS` 注册表就能用，目前两张：
+
+```js
+'traffic-light', 'remote-switch'  →  board-esp32-devkit-c-v4   (38 脚)
+'servo-ring'                      →  wokwi-arduino-mega        (85 脚)
+```
+
+**不认识的板卡直接抛错**，而不是猜一个板框画上去：
+
+```js
+throw new Error('diagram.json has no supported board. Known: ... ' +
+  'Add one to BOARDS in pcbview.js (pin coordinates are in @wokwi/elements) instead of guessing.');
+```
 
 ### 3.2 走线规则
 
-导线一律**正交折线**，从引脚先垂直出板，再绕到板外走线，**绝不横穿 PCB**：
+导线一律**正交折线**，从引脚出发先走出器件，再绕到板外，**绝不横穿 PCB**：
 
-- 两端都在同一侧排针 → 简单 Z 形；
 - 一端在排针、另一端在板外且同侧 → 直接拐出去；
 - 两端分居两侧 → 从最近的水平边绕过去，每条线占一条独立轨道（`lanes`），避免叠成一根粗线；
+- 两端都是板外零件（舵机的 V+/GND 串接链）→ 提 10 种标准折法，用 Liang-Barsky 量每条压在板上的长度，**取压得最少、其次最短的那条**；
 - 竖直线段也按"可用空隙"分配通道数（`VMAX`），密集的图会自动收敛而不是撞到旁边的元件。
 
-`PcbView.render()` 返回的 `audit.crossings` 是硬指标：用 Liang-Barsky 求交逐段检查，任何一段线压到板框（除引脚自身那一小段引线）都会被计数。CI 里就有这一步，`crossings != 0` 直接失败。
+三条硬规矩，都是被真实工程打出来的：
+
+1. **拐点按板边算，不按引脚算**。Mega 的数字排针是双列，内列离板边还有 13 unit；以"引脚 + 间距"算拐点，拐点就落在板子里，竖线贴着排针从 PCB 上划过去。
+2. **双列中内列的引线必须穿出板边**。`out = min(ox - depth, bx0 - depth)` —— 取"从引脚算"和"从板边算"里更靠外的那一个。
+3. **板外零件之间的线不能只画 L 形**。环形阵列里"左右两侧的舵机连 V+" 这种线，L 形一定穿板，必须绕上/下边。
+
+`PcbView.render()` 返回的 `audit` 是硬指标：
+
+| 字段 | 含义 | 要求 |
+|---|---|---|
+| `wires` | 解析成功并画出来的连线数 | 等于 `connections` 去虚线的数量 |
+| `crossings` | 压到板框的线段数（Liang-Barsky 逐段求交） | **必须 0** |
+| `leads` | 压到板框、但端点是引脚自身的那一小段 | 不参与判定，只报数 |
+| `mode` | `avoid`（默认）/ `direct` | —— |
+
+`leads` 为什么不算错：零件压在板边时（32 舵机环每个拐角都这样），它的引脚坐标**就在板框内部**，导线只能从板子里起笔。这是布局事实，不是走线选择。
+
+`route:'direct'` 是逃生舱：出引脚 14 unit 就正交连过去，不绕板。只用于板卡引脚朝上/朝下这种 `avoid` 不认识的布局。**密集图不要用它** —— 32 舵机环用 direct 会有 21 段线横穿 PCB，用默认的 avoid 是 0 段。
 
 ### 3.3 交互
 
 - **LED 亮度**由页面状态驱动：`PcbView.setBrightness(host, partId, 0..1)`，PWM 项目直接喂 `duty/255`；
+- **舵机角度**：`PcbView.setAngle` 只改一个件的喇叭口（不重绘整图），`transform` 由 `PcbView.hornTransform(deg)` 给出；32 个舵机每秒更新几十次也不掉帧；
 - 点图上的灯 = 切到该灯的手动模式；
 - 悬停**任意引脚**（用到没用到的都算）显示 `引脚名 · → 目标`，空闲引脚显示 `引脚名 · (未使用)`；悬停时该焊盘会亮起青色环；
 - 悬停**导线**显示 `起点 → 终点`（`<title>`），线会变粗；**不要再给导线加 `cursor:help`** —— 浏览器会在箭头旁画一个问号，用户会当成报错（已经踩过）；
 - 「放大」按钮把图放大到整栏宽度，方便看引脚名。
 
-引脚丝印是**全部 38 个都打印**的（真实 DevKitC 就是这么印的），其中电路用到的引脚更亮、并带青色环；只印用到的引脚会让人问"旁边那些空脚是什么"。
+引脚丝印是**全部引脚都打印**的（真实板子就是这么印的），其中电路用到的引脚更亮、并带青色环；只印用到的引脚会让人问"旁边那些空脚是什么"。
+
+双列排针的丝印要特殊处理，否则名字全压在焊盘上：两列只隔 10 unit、焊盘直径 6.8，中间塞不下字。**内列名字写在自己内侧，外列名字写在板边留白里**。
 
 ### 3.4 不要做的事
 
 - **不要为某个项目手改这张图**。图跟着 `diagram.json` 变，改图等于骗人。
 - **不要手改页面里的 PCB-VIEW 块**。它由 `scripts/pcbview.js` 生成，改完跑 `node scripts/sync_pcbview.js`。
-- 元件库目前覆盖 ESP32 开发板、`wokwi-led`、`wokwi-resistor`。要加按键/舵机/OLED，在 `pinsOf()` 里补上该元件的引脚坐标即可（空元件的 `pinsOf` 返回 `{}`，对应的线会被跳过而不是画错）。
+- **不要为了让某个图 `crossings=0` 去挪 `diagram.json` 里的零件**。图的出处必须和真实仿真一致；挪了就不是同一个电路了。（唯一例外是零件压进板子里 7 unit 这种明显的数据缺陷，处理方式见 `nudge()`，且要在查看器里写明。）
+- 元件库目前覆盖 ESP32 开发板、Arduino Mega、`wokwi-led`、`wokwi-resistor`、`wokwi-servo`。要加按键/OLED，在 `pinsOf()` 里补上该元件的引脚坐标即可（空元件的 `pinsOf` 返回 `{}`，对应的线会被跳过而不是画错）。
 
 ---
 

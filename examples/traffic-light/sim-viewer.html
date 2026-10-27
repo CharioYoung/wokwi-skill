@@ -378,6 +378,78 @@ var PcbView = (function () {
   var PIN_Y0 = 22;
   var BH = PIN_Y0 + (LEFT.length - 1) * PITCH + 22;   // + room for the USB jack
   var LED_W = 40, LED_H = 50, RES_W = 58.8, RES_H = 11.3;
+  var SERVO_W = 170.08, SERVO_H = 119.55;             // from servo-element viewBox
+
+  /* Arduino Mega 2560: 102.66mm x 50.80mm, and Wokwi world units are 9.5 per
+     2.54mm, so 383.97 x 190. The 85 pin coordinates below are copied verbatim
+     from @wokwi/elements arduino-mega-element.js (MIT) - not guessed. */
+  var MEGA_W = 384, MEGA_H = 190;
+  var MEGA_PINS = {
+    'SCL': [90, 9], 'SDA': [100, 9], 'AREF': [109, 9], 'GND.1': [119, 9],
+    '13': [129, 9], '12': [138, 9], '11': [148, 9], '10': [157.5, 9],
+    '9': [167.5, 9], '8': [177, 9], '7': [190, 9], '6': [200, 9],
+    '5': [209.5, 9], '4': [219, 9], '3': [228.5, 9], '2': [238, 9],
+    '1': [247.5, 9], '0': [257.5, 9], '14': [270.5, 9], '15': [280, 9],
+    '16': [289.5, 9], '17': [299, 9], '18': [308.5, 9], '19': [318.5, 9],
+    '20': [328, 9], '21': [337.5, 9], '5V.1': [361, 8], '5V.2': [371, 8],
+    '22': [361, 17.5], '23': [371, 17.5], '24': [361, 27.25], '25': [371, 27.25],
+    '26': [361, 36.75], '27': [371, 36.75], '28': [361, 46.25], '29': [371, 46.25],
+    '30': [361, 56], '31': [371, 56], '32': [361, 65.5], '33': [371, 65.5],
+    '34': [361, 75], '35': [371, 75], '36': [361, 84.5], '37': [371, 84.5],
+    '38': [361, 94.25], '39': [371, 94.25], '40': [361, 103.75], '41': [371, 103.75],
+    '42': [361, 113.5], '43': [371, 113.5], '44': [361, 123], '45': [371, 123],
+    '46': [361, 132.75], '47': [371, 132.75], '48': [361, 142.25], '49': [371, 142.25],
+    '50': [361, 152], '51': [371, 152], '52': [361, 161.5], '53': [371, 161.5],
+    'GND.4': [361, 171.25], 'GND.5': [371, 171.25],
+    'IOREF': [136, 184.5], 'RESET': [145.5, 184.5], '3.3V': [155, 184.5],
+    '5V': [164.5, 184.5], 'GND.2': [174.25, 184.5], 'GND.3': [183.75, 184.5],
+    'VIN': [193.5, 184.5], 'A0': [208.5, 184.5], 'A1': [218, 184.5],
+    'A2': [227.5, 184.5], 'A3': [237.25, 184.5], 'A4': [246.75, 184.5],
+    'A5': [256.25, 184.5], 'A6': [266, 184.5], 'A7': [275.5, 184.5],
+    'A8': [290.25, 184.5], 'A9': [300, 184.5], 'A10': [309.5, 184.5],
+    'A11': [319.25, 184.5], 'A12': [328.75, 184.5], 'A13': [338.5, 184.5],
+    'A14': [348, 184.5], 'A15': [357.75, 184.5]
+  };
+
+  /* A JS object reorders numeric-looking keys ('0', '22', ...) to the front, so
+     the silkscreen would come out in a meaningless order. Keep the physical
+     order explicitly: left-to-right along the top, then down the right side. */
+  var MEGA_ORDER = [
+    'SCL', 'SDA', 'AREF', 'GND.1', '13', '12', '11', '10',
+    '9', '8', '7', '6', '5', '4', '3', '2',
+    '1', '0', '14', '15', '16', '17', '18', '19',
+    '20', '21', '5V.1', '5V.2', '22', '23', '24', '25',
+    '26', '27', '28', '29', '30', '31', '32', '33',
+    '34', '35', '36', '37', '38', '39', '40', '41',
+    '42', '43', '44', '45', '46', '47', '48', '49',
+    '50', '51', '52', '53', 'GND.4', 'GND.5', 'IOREF', 'RESET',
+    '3.3V', '5V', 'GND.2', 'GND.3', 'VIN', 'A0', 'A1', 'A2',
+    'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'A9', 'A10',
+    'A11', 'A12', 'A13', 'A14', 'A15'
+  ];
+
+  var ESP32_PINS = (function () {
+    var out = {}, i;
+    for (i = 0; i < LEFT.length; i++) out[LEFT[i]] = [5.0, PIN_Y0 + i * PITCH];
+    for (i = 0; i < RIGHT.length; i++) out[RIGHT[i]] = [101.3, PIN_Y0 + i * PITCH];
+    return out;
+  })();
+
+  var BOARDS = {
+    'board-esp32-devkit-c-v4': { w: BW, h: BH, pins: ESP32_PINS, kind: 'esp32',
+                                 order: LEFT.concat(RIGHT) },
+    'wokwi-arduino-mega': { w: MEGA_W, h: MEGA_H, pins: MEGA_PINS, kind: 'mega',
+                            order: MEGA_ORDER }
+  };
+
+  /* Other devkit-c variants share the 38-pin layout, so they fall back. An
+     unknown board never renders as an empty shell: the error names what is
+     supported, because a wrong pin map is worse than no map. */
+  function boardOf(type) {
+    if (BOARDS[type]) return BOARDS[type];
+    if (String(type).indexOf('board-esp32') === 0) return BOARDS['board-esp32-devkit-c-v4'];
+    return null;
+  }
 
   var GAP = 13;                 // how far a wire clears the board before it turns
   var CLEAR = 11;               // clearance kept from the footprint
@@ -407,30 +479,45 @@ var PcbView = (function () {
     });
   }
   function num(v) { return Math.round(v * 100) / 100; }
-  function isBoard(t) { return String(t).indexOf('board-esp32') === 0; }
+  function isBoard(t) { return !!boardOf(t); }
 
   function pinsOf(part) {
-    var out = {}, i, t = part.type;
-    if (isBoard(t)) {
-      for (i = 0; i < LEFT.length; i++) out[LEFT[i]] = [5.0, PIN_Y0 + i * PITCH];
-      for (i = 0; i < RIGHT.length; i++) out[RIGHT[i]] = [101.3, PIN_Y0 + i * PITCH];
-    } else if (t === 'wokwi-led') {
+    var out = {}, i, t = part.type, b = boardOf(t);
+    if (b) return b.pins;
+    if (t === 'wokwi-led') {
       var flip = part.attrs && part.attrs.flip != null;
       out.A = [flip ? 15 : 25, 42];
       out.C = [flip ? 25 : 15, 42];
     } else if (t === 'wokwi-resistor') {
       out['1'] = [0, 5.65];
       out['2'] = [RES_W, 5.65];
+    } else if (t === 'wokwi-servo') {
+      /* servo-element: three stubs on the left edge, signal last */
+      out.GND = [0, 50];
+      out['V+'] = [0, 59.5];
+      out.PWM = [0, 69];
     }
     return out;
   }
 
   function sizeOf(part) {
-    var t = part.type;
-    if (isBoard(t)) return [BW, BH];
+    var t = part.type, b = boardOf(t);
+    if (b) return [b.w, b.h];
     if (t === 'wokwi-led') return [LED_W, LED_H];
     if (t === 'wokwi-resistor') return [RES_W, RES_H];
+    if (t === 'wokwi-servo') return [SERVO_W, SERVO_H];
     return [40, 40];
+  }
+
+  /* A part is rotated about the centre of its footprint - that is what Wokwi's
+     rotate attribute does, and what the SVG <g transform> below reproduces. */
+  function rotatePt(part, p) {
+    if (!part.rotate) return p;
+    var sz = sizeOf(part), a = part.rotate * Math.PI / 180;
+    var cx = sz[0] / 2, cy = sz[1] / 2;
+    var dx = p[0] - cx, dy = p[1] - cy;
+    return [cx + dx * Math.cos(a) - dy * Math.sin(a),
+            cy + dx * Math.sin(a) + dy * Math.cos(a)];
   }
 
   /* Resistor bands: the value is split into two significant digits plus a
@@ -451,6 +538,11 @@ var PcbView = (function () {
   /* The board is drawn, not copied: the open-source package has no v4 part.
      Every dimension below follows the real 2.54 mm header grid. */
   function boardSvg(part, sfx) {
+    var b = boardOf(part.type);
+    return b && b.kind === 'mega' ? megaSvg(part) : esp32Svg(part, sfx);
+  }
+
+  function esp32Svg(part, sfx) {
     var g = ['<g class="pcb-board" transform="translate(' + num(part.left) + ',' + num(part.top) + ')">'];
     g.push('<rect x="0" y="0" width="' + BW + '" height="' + num(BH) + '" rx="7.5" fill="#1a1a1a" stroke="#000" stroke-width=".8"/>');
     [[7, 7], [BW - 7, 7], [7, BH - 7], [BW - 7, BH - 7]].forEach(function (c) {
@@ -497,6 +589,97 @@ var PcbView = (function () {
     }
     g.push('</g>');
     return g.join('');
+  }
+
+  /* Arduino Mega 2560: teal PCB, headers on three edges, USB-B and the barrel
+     jack on the left. Pads go on the official pin coordinates, so the pad grid
+     and the wire endpoints are the same numbers. */
+  function megaSvg(part) {
+    var g = ['<g class="pcb-board" transform="translate(' + num(part.left) + ',' + num(part.top) + ')">'];
+    g.push('<rect x="0" y="0" width="' + MEGA_W + '" height="' + MEGA_H + '" rx="9" fill="#177c8c" stroke="#0c5560" stroke-width="1"/>');
+    g.push('<rect x="3" y="3" width="' + (MEGA_W - 6) + '" height="' + (MEGA_H - 6) + '" rx="7" fill="none" stroke="#2f97a6" stroke-width=".8"/>');
+    [[11, 11], [MEGA_W - 11, 11], [11, MEGA_H - 11], [MEGA_W - 11, MEGA_H - 11]].forEach(function (c) {
+      g.push('<circle cx="' + c[0] + '" cy="' + c[1] + '" r="3.4" fill="#d9dde0" stroke="#8d9499" stroke-width=".8"/>');
+    });
+
+    /* header strips: top row, the double row on the right, the analogue row */
+    g.push('<rect x="86" y="4.5" width="292" height="10" rx="1.2" fill="#101010"/>');
+    g.push('<rect x="356.5" y="14" width="20" height="163" rx="1.2" fill="#101010"/>');
+    g.push('<rect x="132" y="179.5" width="232" height="10" rx="1.2" fill="#101010"/>');
+
+    /* barrel jack + USB-B */
+    g.push('<rect x="7" y="10" width="38" height="30" rx="3" fill="#1b1b1b" stroke="#000" stroke-width="1"/>');
+    g.push('<rect x="12" y="18" width="16" height="14" rx="2" fill="#3a3a3a"/>');
+    g.push('<rect x="8" y="52" width="34" height="26" rx="2" fill="#c9ced3" stroke="#8d9499" stroke-width="1"/>');
+    g.push('<rect x="14" y="57" width="22" height="16" rx="1" fill="#8d9499"/>');
+
+    /* the two big chips */
+    g.push('<rect x="150" y="52" width="62" height="62" rx="2" fill="#1c1c1c" stroke="#000" stroke-width="1"/>');
+    g.push('<circle cx="158" cy="60" r="2.4" fill="#3a3a3a"/>');
+    g.push('<rect x="60" y="96" width="34" height="34" rx="2" fill="#1c1c1c" stroke="#000" stroke-width="1"/>');
+    g.push('<circle cx="66" cy="102" r="1.8" fill="#3a3a3a"/>');
+
+    /* reset button + LEDs */
+    g.push('<rect x="96" y="42" width="18" height="14" rx="1.5" fill="#8e4b2a" stroke="#5c2f19" stroke-width=".8"/>');
+    g.push('<circle cx="120" cy="48" r="3" fill="#2e7d32" stroke="#1b4d1f" stroke-width=".5"/>');
+
+    g.push('<text x="188" y="130" font-family="Helvetica,Arial" font-size="12" fill="#cfe9ee" text-anchor="middle" letter-spacing="1">ARDUINO MEGA 2560</text>');
+    g.push('<text x="188" y="146" font-family="Helvetica,Arial" font-size="7" fill="#9fd2da" text-anchor="middle">POWER &amp; ANALOG IN</text>');
+
+    /* one pad per official pin coordinate */
+    Object.keys(MEGA_PINS).forEach(function (nm) {
+      var p = MEGA_PINS[nm];
+      g.push('<rect x="' + num(p[0] - 2.6) + '" y="' + num(p[1] - 2.35) + '" width="5.2" height="4.7" rx="1" fill="#d1c479" stroke="#8a7f45" stroke-width=".5"/>');
+      g.push('<circle cx="' + num(p[0]) + '" cy="' + num(p[1]) + '" r="1.25" fill="#141414"/>');
+    });
+    g.push('</g>');
+    return g.join('');
+  }
+
+  /* Servo artwork is the official one (servo-element.js, MIT): body, mounting
+     tabs, three-wire lead and the horn, with the horn angle left parametric so
+     a moving servo can be drawn without a second template. */
+  var SERVO_ART = [
+    '<defs><g id="spin__SFX__">',
+    '<rect x="0" y="-1.91" width="3.72" height="3.71"/>',
+    '<path d="m2.026 -1.91h13.532l-13.425 0.51865z"/>',
+    '<path d="m2.026 1.8h13.532l-13.425-0.50702z"/>',
+    '<rect fill="#ccc" x="0.33" y="-1.23" width="3.04" height="2.46" rx=".15"/>',
+    '</g></defs>',
+    '<g stroke-width="2.7" fill="none">',
+    '<path stroke="#b44200" d="m83.32 56.6c0 0-32.99 .96-43.32 0-6.2-.58-10.6-6.2-14.87-6.31"/>',
+    '<path stroke="#ff2300" d="m83.326 59.6h-62.971"/>',
+    '<path stroke="#f47b00" d="m83.32 62.6c0 0-32.6-.61-43.33-.15-6.87 .29-12.01 6.82-14.77 6.73"/>',
+    '</g>',
+    '<rect fill="#666" y="45.5" width="25.71" height="28" rx="1.14"/>',
+    '<use xlink:href="#spin__SFX__" x="4.7" y="50.06"/>',
+    '<use xlink:href="#spin__SFX__" x="4.7" y="59.66"/>',
+    '<use xlink:href="#spin__SFX__" x="4.7" y="69.26"/>',
+    '<path fill="#4d4d4d" d="m163.92 66.867a7.09 7.09 0 1 1 5.8145-11.136 0.18 0.18 0 0 0 0.33-0.10234v-14.346h-17.664v36.98h17.676v-14.346a0.18 0.18 0 0 0-0.333-0.107 7.08 7.08 0 0 1-5.83 3.06z"/>',
+    '<path fill="#4d4d4d" d="m55.068 66.75a7.09 7.09 0 1 0-5.8261-11.136 0.18 0.18 0 0 1-0.33-0.10234v-14.346h17.676v36.98h-17.676v-14.346a0.18 0.18 0 0 1 0.333-0.107 7.08 7.08 0 0 0 5.83 3.06z"/>',
+    '<rect fill="#666" x="64.255" y="37.911" width="90.241" height="43.725" rx="5.3331"/>',
+    '<path fill="gray" d="m110.07 50.005h-14.42v19.537h14.42a9.7684 9.7684 0 0 0 0-19.537z"/>',
+    '<circle fill="#999" cx="91.467" cy="59.773" r="18.606"/>',
+    '<path data-horn="1" fill="__HORN__" transform="translate(91.467 59.773) rotate(__ANGLE__) translate(-91.467 -59.773)" d="m101.6 59.589-4.3167-54.166c0-2.8654-2.6026-5.1912-5.8145-5.1912s-5.8145 2.3258-5.8145 5.1912l-4.3167 54.166a8.3264 8.3264 0 0 0-.10234 1.2792c0 5.047 4.5818 9.1381 10.234 9.1381s10.234-4.0911 10.234-9.1381a8.3264 8.3264 0 0 0-.10233-1.2792zm-10.131-48.658a2.791 2.791 0 1 1-2.791 2.791 2.791 2.791 0 0 1 2.791-2.791zm0 8.6055a2.791 2.791 0 1 1-2.791 2.791 2.791 2.791 0 0 1 2.791-2.791zm0 8.3729a2.791 2.791 0 1 1-2.791 2.791 2.791 2.791 0 0 1 2.791-2.791zm0 8.6055a2.791 2.791 0 1 1-2.791 2.791 2.791 2.791 0 0 1 2.791-2.791zm5.9215 29.412a8.3729 8.3729 0 1 1 0-11.843 8.3729 8.3729 0 0 1 0 11.843z"/>',
+    '<circle fill="gray" cx="91.467" cy="59.773" r="8.3729"/>',
+    '<circle fill="#ccc" cx="91.467" cy="59.773" r="6.2494"/>',
+    '<path fill="#666" d="m94.911 62.543-2.3839-2.4165a.42562 .42562 0 0 1 0-.60471l2.4281-2.3863a.64657 .64657 0 0 0 .06512-.8652 .62797 .62797 0 0 0-.93032-.05117l-2.4351 2.4049a.4326 .4326 0 0 1-.60703 0l-2.3863-2.4165a.6489 .6489 0 0 0-.8652-.06512 .63262 .63262 0 0 0-.05117 .93032l2.4049 2.4328a.42795 .42795 0 0 1 0 .60703l-2.4142 2.3863a.65122 .65122 0 0 0-.06745 .8652 .63029 .63029 0 0 0 .93032 .05117l2.4351-2.4049a.42562 .42562 0 0 1 .60471 0l2.3863 2.4398a.63262 .63262 0 0 0 .93032-.04186 .64657 .64657 0 0 0-.04419-.8652z"/>'
+  ].join('');
+
+  var HORNS = { Red: '#c0392b', Blue: '#2c6fb5', White: '#e8e8e8', Black: '#222',
+                Green: '#2e8b3d', Orange: '#d2691e', Yellow: '#e0b400' };
+
+  function servoSvg(part) {
+    var attrs = part.attrs || {};
+    var horn = HORNS[attrs.hornColor] || HORNS[attrs.hornColor && String(attrs.hornColor).toLowerCase()] || '#c0392b';
+    var sfx = '_' + String(part.id).replace(/[^A-Za-z0-9_-]/g, '');
+    var rot = part.rotate ? ' rotate(' + num(part.rotate) + ' ' + num(SERVO_W / 2) + ' ' + num(SERVO_H / 2) + ')' : '';
+    return '<g class="pcb-part" data-part="' + esc(part.id) + '" transform="translate(' +
+      num(part.left) + ',' + num(part.top) + ')' + rot + '">' +
+      SERVO_ART.replace(/__SFX__/g, sfx)
+               .replace('__HORN__', horn)
+               .replace('__ANGLE__', String(attrs.angle == null ? 0 : attrs.angle)) +
+      '</g>';
   }
 
   /* LED body: official geometry, colour and glow stay parametric so one
@@ -565,12 +748,14 @@ var PcbView = (function () {
   /* Orthogonal polylines only. A real board is wired around its edge; a
      bezier straight through the PCB looks wrong and hides which pin is
      which. Lane counters keep parallel runs from overlapping. */
-  function makeRouter(dia, index) {
+  function makeRouter(dia, index, mode) {
+    mode = mode || 'avoid';
     var board = null, i;
     for (i = 0; i < dia.parts.length; i++) if (isBoard(dia.parts[i].type)) board = dia.parts[i];
     if (!board) return null;
+    var bsize = sizeOf(board);
     var bx0 = board.left, by0 = board.top;
-    var bx1 = bx0 + BW, by1 = by0 + BH;
+    var bx1 = bx0 + bsize[0], by1 = by0 + bsize[1];
     var lanes = { top: 0, bot: 0 };
     /* Vertical channels: every wire that steps out of the header gets its own
        x offset. Without this, all wires leaving the same side turn at the same
@@ -607,7 +792,22 @@ var PcbView = (function () {
       if (!p) return null;
       var pl = pinsOf(p);
       if (!pl[name]) return null;
-      return [p.left + pl[name][0], p.top + pl[name][1]];
+      if (!p.rotate) return [p.left + pl[name][0], p.top + pl[name][1]];
+      var r = rotatePt(p, pl[name]);
+      return [p.left + r[0], p.top + r[1]];
+    }
+
+    /* Which edge of its footprint a pin sits on. Decided by position, not by a
+       per-board table, so it works for any part whose pinsOf() we know. */
+    function edgeOf(part, pt) {
+      var sz = sizeOf(part), w = sz[0], h = sz[1];
+      if (pt[0] <= w * 0.1) return 'L';
+      if (pt[0] >= w * 0.9) return 'R';
+      if (pt[1] <= h * 0.1) return 'T';
+      if (pt[1] >= h * 0.9) return 'B';
+      var d = [pt[0], w - pt[0], pt[1], h - pt[1]];
+      var m = Math.min(d[0], d[1], d[2], d[3]);
+      return m === d[0] ? 'L' : (m === d[1] ? 'R' : (m === d[2] ? 'T' : 'B'));
     }
     function sideOf(ref) {
       var k = String(ref).indexOf(':');
@@ -615,17 +815,131 @@ var PcbView = (function () {
       var pid = ref.slice(0, k), name = ref.slice(k + 1);
       var p = index[pid];
       if (!p || !isBoard(p.type)) return null;
-      return LEFT.indexOf(name) >= 0 ? 'L' : (RIGHT.indexOf(name) >= 0 ? 'R' : null);
+      var pl = pinsOf(p);
+      return pl[name] ? edgeOf(p, pl[name]) : null;
+    }
+
+    /* Outward unit vector for a pin, snapped to an axis: a rotated part would
+       otherwise emit diagonal stubs, and every segment here must be orthogonal. */
+    var DIRV = { L: [-1, 0], R: [1, 0], T: [0, -1], B: [0, 1] };
+    function exitVec(ref) {
+      var k = String(ref).indexOf(':');
+      if (k < 0) return null;
+      var pid = ref.slice(0, k), name = ref.slice(k + 1);
+      var p = index[pid];
+      if (!p) return null;
+      var pl = pinsOf(p);
+      if (!pl[name]) return null;
+      var v = DIRV[edgeOf(p, pl[name])].slice();
+      if (p.rotate) {
+        var a = p.rotate * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+        var vx = v[0] * c - v[1] * s, vy = v[0] * s + v[1] * c;
+        v = Math.abs(vx) >= Math.abs(vy) ? [vx > 0 ? 1 : -1, 0] : [0, vy > 0 ? 1 : -1];
+      }
+      return v;
+    }
+
+    function dedupe(pts) {
+      var out = [];
+      for (var i = 0; i < pts.length; i++) {
+        var p = pts[i], q = out[out.length - 1];
+        if (q && Math.abs(p[0] - q[0]) < 0.01 && Math.abs(p[1] - q[1]) < 0.01) continue;
+        if (out.length >= 2) {
+          var r = out[out.length - 2];
+          var col = (Math.abs(r[0] - q[0]) < 0.01 && Math.abs(q[0] - p[0]) < 0.01) ||
+                    (Math.abs(r[1] - q[1]) < 0.01 && Math.abs(q[1] - p[1]) < 0.01);
+          if (col) { out[out.length - 1] = p; continue; }
+        }
+        out.push(p);
+      }
+      return out;
+    }
+
+    /* Direct routing: step out of each pin along its own edge, then join the two
+       stubs orthogonally. Used when the parts surround the board (a ring of 32
+       servos cannot be wired with edge-hugging lanes: it would need 30 lanes
+       running off the canvas), and as the fallback for boards whose pins face
+       up or down, which the lane router does not model. */
+    function routeDirect(a, b, pa, pb) {
+      var va = exitVec(a) || [1, 0], vb = exitVec(b) || [1, 0];
+      var d = 14;
+      var a1 = [pa[0] + va[0] * d, pa[1] + va[1] * d];
+      var b1 = [pb[0] + vb[0] * d, pb[1] + vb[1] * d];
+      var pts;
+      if (va[1] === 0 && vb[1] === 0) {
+        var mx = (a1[0] + b1[0]) / 2;
+        pts = [pa, a1, [mx, a1[1]], [mx, b1[1]], b1, pb];
+      } else if (va[0] === 0 && vb[0] === 0) {
+        var my = (a1[1] + b1[1]) / 2;
+        pts = [pa, a1, [a1[0], my], [b1[0], my], b1, pb];
+      } else if (va[1] === 0) {
+        pts = [pa, a1, [b1[0], a1[1]], b1, pb];
+      } else {
+        pts = [pa, a1, [a1[0], b1[1]], b1, pb];
+      }
+      return dedupe(pts);
+    }
+
+    /* Wires that touch no header still have to get from one part to the next
+       without being drawn over the board. Instead of special-casing every
+       combination of sides, propose a handful of orthogonal shapes, measure
+       how much of each would land on the PCB, and keep the best. The two
+       plain bends are the old behaviour, so a diagram that already routed
+       cleanly cannot get worse. */
+    var lc = { top: 0, bot: 0, L: 0, R: 0 };
+    function routeFree(pa, pb) {
+      var t0 = by0 - CLEAR - lc.top * LANE, b0 = by1 + CLEAR + lc.bot * LANE;
+      var l0 = bx0 - GAP - lc.L * LANE_V, r0 = bx1 + GAP + lc.R * LANE_V;
+      var cands = [
+        { lane: null, pts: [[pa[0], pa[1]], [pb[0], pa[1]], [pb[0], pb[1]]] },
+        { lane: null, pts: [[pa[0], pa[1]], [pa[0], pb[1]], [pb[0], pb[1]]] },
+        { lane: 'top', pts: [[pa[0], pa[1]], [pa[0], t0], [pb[0], t0], [pb[0], pb[1]]] },
+        { lane: 'bot', pts: [[pa[0], pa[1]], [pa[0], b0], [pb[0], b0], [pb[0], pb[1]]] },
+        { lane: 'R', pts: [[pa[0], pa[1]], [r0, pa[1]], [r0, pb[1]], [pb[0], pb[1]]] },
+        { lane: 'L', pts: [[pa[0], pa[1]], [l0, pa[1]], [l0, pb[1]], [pb[0], pb[1]]] },
+        { lane: 'topR', pts: [[pa[0], pa[1]], [pa[0], t0], [r0, t0], [r0, pb[1]], [pb[0], pb[1]]] },
+        { lane: 'botR', pts: [[pa[0], pa[1]], [pa[0], b0], [r0, b0], [r0, pb[1]], [pb[0], pb[1]]] },
+        { lane: 'topL', pts: [[pa[0], pa[1]], [pa[0], t0], [l0, t0], [l0, pb[1]], [pb[0], pb[1]]] },
+        { lane: 'botL', pts: [[pa[0], pa[1]], [pa[0], b0], [l0, b0], [l0, pb[1]], [pb[0], pb[1]]] }
+      ];
+      var best = null;
+      cands.forEach(function (c) {
+        var p = dedupe(c.pts), over = 0, len = 0, i;
+        for (i = 0; i < p.length - 1; i++) {
+          over += segOverlap(p[i], p[i + 1], [bx0, by0], [bx1, by1]);
+          len += Math.abs(p[i + 1][0] - p[i][0]) + Math.abs(p[i + 1][1] - p[i][1]);
+        }
+        /* strictly fewer crossings wins; on a tie, the shorter run (which is
+           also the one with fewer elbows, since both are orthogonal) */
+        if (!best || over < best.over - 0.01 ||
+            (Math.abs(over - best.over) <= 0.01 && len < best.len - 0.01)) {
+          best = { pts: p, over: over, len: len, lane: c.lane };
+        }
+      });
+      if (best && best.lane) {
+        var keys = { topR: ['top', 'R'], botR: ['bot', 'R'], topL: ['top', 'L'], botL: ['bot', 'L'] };
+        (keys[best.lane] || [best.lane]).forEach(function (k) { lc[k]++; });
+      }
+      return best ? best.pts : [[pa[0], pa[1]], [pb[0], pb[1]]];
     }
 
     function route(a, b, pa, pb) {
       var x1 = pa[0], y1 = pa[1], x2 = pb[0], y2 = pb[1];
       var sa = sideOf(a), sb = sideOf(b);
+      if (mode === 'direct') return routeDirect(a, b, pa, pb);
+      /* the lane router only knows left/right headers */
+      if ((sa && sa !== 'L' && sa !== 'R') || (sb && sb !== 'L' && sb !== 'R')) {
+        return routeDirect(a, b, pa, pb);
+      }
+      if (!sa && !sb) return routeFree(pa, pb);
 
       if (sa && sb && sa === sb) {
         if (Math.abs(y1 - y2) < 1) return [[x1, y1], [x2, y2]];
-        var mx = (x1 + x2) / 2;
-        return [[x1, y1], [mx, y1], [mx, y2], [x2, y2]];
+        /* A double-row header puts one column inside the footprint, so the
+           turn has to be measured from the board edge, not from the pin. */
+        var d3 = takeDepth(sa);
+        var ch = sa === 'L' ? Math.min(x1, x2, bx0) - d3 : Math.max(x1, x2, bx1) + d3;
+        return [[x1, y1], [ch, y1], [ch, y2], [x2, y2]];
       }
 
       var pairs = [[sa, pa, pb, b], [sb, pb, pa, a]];
@@ -635,7 +949,9 @@ var PcbView = (function () {
         var p1 = pairs[i][1], p2 = pairs[i][2], other = pairs[i][3];
         var ox = p1[0], oy = p1[1], tx = p2[0], ty = p2[1];
         var depth = takeDepth(s);
-        var out = s === 'L' ? ox - depth : ox + depth;
+        /* Same trap as above: the turn must clear the edge, not the pin, or a
+           double-row column drags the run across the PCB. */
+        var out = s === 'L' ? Math.min(ox - depth, bx0 - depth) : Math.max(ox + depth, bx1 + depth);
         var sameSide = (s === 'L' && tx < bx0) || (s === 'R' && tx > bx1);
         if (sameSide) return [[ox, oy], [out, oy], [out, ty], [tx, ty]];
 
@@ -660,7 +976,8 @@ var PcbView = (function () {
       return [[x1, y1], [mx2, y1], [mx2, y2], [x2, y2]];
     }
 
-    return { route: route, absPin: absPin, bx0: bx0, by0: by0, bx1: bx1, by1: by1, lanes: lanes };
+    return { route: route, routeDirect: routeDirect, absPin: absPin, edgeOf: edgeOf,
+             bx0: bx0, by0: by0, bx1: bx1, by1: by1, lanes: lanes };
   }
 
   /* --------------------------------------------------------------- audit */
@@ -683,16 +1000,23 @@ var PcbView = (function () {
     return Math.sqrt(Math.pow(dx * (t1 - t0), 2) + Math.pow(dy * (t1 - t0), 2));
   }
 
-  function audit(dia, routed) {
-    var r = makeRouter(dia, byId(dia)), offenders = [];
-    if (!r) return { wires: 0, crossings: 0, offenders: [] };
+  function audit(dia, routed, mode) {
+    var r = makeRouter(dia, byId(dia), mode), offenders = [];
+    if (!r) return { wires: 0, crossings: 0, offenders: [], excused: 0, mode: mode };
+    /* Every pin of every part, not just the header. A part parked on the board
+       edge (the 32-servo ring does exactly that at every corner) puts its own
+       pin inside the footprint, and the lead out of it has to start there.
+       That is a layout fact, not a routing choice, so it is counted
+       separately as an excused lead instead of being blamed on the router. */
     var pinPts = [];
     dia.parts.forEach(function (p) {
-      if (!isBoard(p.type)) return;
       var pl = pinsOf(p);
-      Object.keys(pl).forEach(function (n) { pinPts.push([p.left + pl[n][0], p.top + pl[n][1]]); });
+      Object.keys(pl).forEach(function (n) {
+        var q = p.rotate ? rotatePt(p, pl[n]) : pl[n];
+        pinPts.push([p.left + q[0], p.top + q[1]]);
+      });
     });
-    var n = 0;
+    var n = 0, excused = 0;
     routed.forEach(function (w) {
       n++;
       for (var i = 0; i < w.pts.length - 1; i++) {
@@ -704,10 +1028,12 @@ var PcbView = (function () {
             if (Math.abs(end[0] - xy[0]) < 0.6 && Math.abs(end[1] - xy[1]) < 0.6) legal = true;
           });
         });
-        if (!legal) offenders.push({ wire: w.title, from: pa, to: pb });
+        if (legal) { excused++; continue; }
+        offenders.push({ wire: w.title, from: pa, to: pb });
       }
     });
-    return { wires: n, crossings: offenders.length, offenders: offenders };
+    return { wires: n, crossings: offenders.length, offenders: offenders,
+             excused: excused, mode: mode || 'avoid' };
   }
 
   /* -------------------------------------------------------------- render */
@@ -724,7 +1050,8 @@ var PcbView = (function () {
     var board = null, i;
     for (i = 0; i < dia.parts.length; i++) if (isBoard(dia.parts[i].type)) board = dia.parts[i];
     if (!board) return;
-    var bx0 = board.left, by0 = board.top, bx1 = bx0 + BW, by1 = by0 + BH;
+    var bsz = sizeOf(board);
+    var bx0 = board.left, by0 = board.top, bx1 = bx0 + bsz[0], by1 = by0 + bsz[1];
     dia.parts.forEach(function (p) {
       if (isBoard(p.type)) return;
       var sz = sizeOf(p);
@@ -755,14 +1082,21 @@ var PcbView = (function () {
     var unusedWord = (opts.i18n && opts.i18n.unused) || 'unused';
     var board = null, i;
     for (i = 0; i < dia.parts.length; i++) if (isBoard(dia.parts[i].type)) board = dia.parts[i];
-    if (!board) throw new Error('diagram.json has no board part (type board-esp32-*)');
+    if (!board) {
+      throw new Error('diagram.json has no supported board. Known: ' +
+        Object.keys(BOARDS).join(', ') + '. Add one to BOARDS in pcbview.js ' +
+        '(pin coordinates are in @wokwi/elements) instead of guessing.');
+    }
+    var boardPins = boardOf(board.type).pins;
+    var bsz = sizeOf(board);
 
-    var bx0 = board.left, by0 = board.top, bx1 = bx0 + BW, by1 = by0 + BH;
+    var bx0 = board.left, by0 = board.top, bx1 = bx0 + bsz[0], by1 = by0 + bsz[1];
     var routed = [], i2;
 
     /* route before laying out: the wrap lanes feed into the viewBox */
-    var router = makeRouter(dia, index);
-    if (!router) throw new Error('diagram.json has no board part (type board-esp32-*)');
+    var routeMode = opts.route === 'direct' ? 'direct' : 'avoid';
+    var router = makeRouter(dia, index, routeMode);
+    if (!router) throw new Error('diagram.json has no supported board');
     for (i2 = 0; i2 < (dia.connections || []).length; i2++) {
       var conn = dia.connections[i2];
       var a = conn[0], b = conn[1], col = conn[2] || 'green';
@@ -771,10 +1105,13 @@ var PcbView = (function () {
       routed.push({ title: a + ' \u2192 ' + b, color: col, pts: router.route(a, b, pa, pb) });
     }
 
+    /* 98 wires at full weight merge into one blob; a 32-servo ring is a
+       harness, and drawing it thinner is what makes it readable as wires. */
+    var sw = routed.length > 40 ? 1.3 : 2.3;
     var wires = routed.map(function (w) {
       var d = 'M' + w.pts.map(function (p) { return num(p[0]) + ' ' + num(p[1]); }).join(' L');
       return '<path class="pcb-wire" d="' + d + '" fill="none" stroke="' + (WIRE[w.color] || w.color) +
-        '" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><title>' +
+        '" stroke-width="' + sw + '" stroke-linecap="round" stroke-linejoin="round"><title>' +
         esc(w.title) + '</title></path>';
     });
 
@@ -782,6 +1119,7 @@ var PcbView = (function () {
       if (isBoard(p.type)) return boardSvg(p, '_' + String(p.id).replace(/[^A-Za-z0-9_-]/g, ''));
       if (p.type === 'wokwi-led') return ledSvg(p, bright[p.id]);
       if (p.type === 'wokwi-resistor') return resSvg(p);
+      if (p.type === 'wokwi-servo') return servoSvg(p);
       return '';
     });
 
@@ -801,20 +1139,63 @@ var PcbView = (function () {
       });
     });
 
-    /* Pin names as silkscreen - ALL of them, the way a real DevKitC is printed.
+    /* Pin names as silkscreen - ALL of them, the way a real board is printed.
        Only the used ones are brightened, which is what draws the eye; hiding
-       the rest made "what is this empty pin?" unanswerable. */
+       the rest made "what is this empty pin?" unanswerable.
+
+       Left/right rows get horizontal text along the board. Top and bottom rows
+       are only 9.5 units apart, so horizontal text would collide: those labels
+       are rotated to read along the pin column, bottom-to-top, like silkscreen. */
     var labels = [];
+    var pinNames = boardOf(board.type).order || Object.keys(boardPins);
+    /* A label is printed upright only where there is room for it. Two pins
+       sharing a row (the Mega's double header) or a horizontal header both
+       force the text to run along the column instead, or the names print on
+       top of each other. */
+    var sideways = {};
+    var sideCols = { L: [], R: [] };
+    pinNames.forEach(function (nm) {
+      var p = boardPins[nm], e = router.edgeOf(board, p);
+      if (e === 'T' || e === 'B') { sideways[nm] = 1; return; }
+      for (var j = 0; j < pinNames.length; j++) {
+        var q = boardPins[pinNames[j]];
+        if (pinNames[j] !== nm && Math.abs(q[1] - p[1]) < 1 &&
+            router.edgeOf(board, q) === e) { sideways[nm] = 1; sideCols[e].push(board.left + p[0]); return; }
+      }
+    });
     if (showLabels) {
-      LEFT.concat(RIGHT).forEach(function (nm) {
+      pinNames.forEach(function (nm) {
         var xy = router.absPin(board.id + ':' + nm);
         if (!xy) return;
-        var isLeft = LEFT.indexOf(nm) >= 0;
-        labels.push('<text x="' + num(isLeft ? bx0 + 9.0 : bx1 - 9.0) +
-          '" y="' + num(xy[1] + 1.6) + '" class="pcb-pinlab' +
-          (used[board.id + ':' + nm] ? ' used' : '') +
-          '" paint-order="stroke" stroke="#1a1a1a" stroke-width="1.5" stroke-linejoin="round" text-anchor="' +
-          (isLeft ? 'start' : 'end') + '">' + esc(nm) + '</text>');
+        var cls = 'pcb-pinlab' + (used[board.id + ':' + nm] ? ' used' : '');
+        var halo = '" paint-order="stroke" stroke="#1a1a1a" stroke-width="1.5" stroke-linejoin="round"';
+        var e = router.edgeOf(board, boardPins[nm]);
+        var t, ax, ay;
+        if (!sideways[nm]) {
+          t = '<text x="' + num(e === 'L' ? bx0 + 9.0 : bx1 - 9.0) + '" y="' + num(xy[1] + 1.6) +
+            '" class="' + cls + halo + ' text-anchor="' + (e === 'L' ? 'start' : 'end') + '">' + esc(nm) + '</text>';
+        } else if (e === 'L' || e === 'R') {
+          /* Double column: the text runs up the board beside its own pad. Two
+             columns are only 10 units apart and a pad is 3.4 wide, so there is
+             no gutter between them. The inner column is named inboard of
+             itself; the outer one is named in the margin inside the board edge.
+             Offsetting everything outward printed the outer names off the PCB
+             (its pads sit on the edge) and the inner names on the far pads. */
+          var cols = sideCols[e] || [xy[0]];
+          var outer = e === 'R' ? xy[0] >= Math.max.apply(null, cols) - 0.5
+                                : xy[0] <= Math.min.apply(null, cols) + 0.5;
+          ax = outer ? (e === 'R' ? bx1 - 4.0 : bx0 + 4.0)
+                     : xy[0] + (e === 'R' ? -6.2 : 6.2);
+          ay = xy[1];
+          t = '<text x="' + num(ax) + '" y="' + num(ay) + '" transform="rotate(-90 ' + num(ax) + ' ' + num(ay) +
+            ')" class="' + cls + halo + ' text-anchor="middle">' + esc(nm) + '</text>';
+        } else {
+          /* top row: text hangs down into the board; bottom row: it climbs up */
+          ax = xy[0] + 1.6; ay = e === 'T' ? by0 + 16 : by1 - 16;
+          t = '<text x="' + num(ax) + '" y="' + num(ay) + '" transform="rotate(-90 ' + num(ax) + ' ' + num(ay) +
+            ')" class="' + cls + halo + ' text-anchor="' + (e === 'T' ? 'end' : 'start') + '">' + esc(nm) + '</text>';
+        }
+        labels.push(t);
       });
     }
     if (showPins) {
@@ -830,7 +1211,7 @@ var PcbView = (function () {
        "none": an unfilled shape does not receive pointer events at all. */
     var hot = [];
     if (hints) {
-      LEFT.concat(RIGHT).forEach(function (nm) {
+      pinNames.forEach(function (nm) {
         var xy = router.absPin(board.id + ':' + nm);
         if (!xy) return;
         var links = pinLinks[nm];
@@ -874,9 +1255,27 @@ var PcbView = (function () {
       viewBox: [vx, vy, vw, vh],
       wires: routed.length,
       parts: dia.parts.length,
-      pins: { used: Object.keys(used).length, total: LEFT.length + RIGHT.length },
-      audit: audit(dia, routed)
+      pins: { used: Object.keys(used).length, total: pinNames.length },
+      audit: audit(dia, routed, routeMode)
     };
+  }
+
+  /* The horn pivots about this point in the servo's own coordinate space. */
+  function hornTransform(deg) {
+    return 'translate(91.467 59.773) rotate(' + (Math.round((deg || 0) * 10) / 10) +
+      ') translate(-91.467 -59.773)';
+  }
+
+  /* Aim one servo without rebuilding the drawing - 32 horns have to move per
+     frame, and re-rendering 157KB of SVG each time is not an option. */
+  function setAngle(root, partId, deg) {
+    if (!root || !root.querySelector) return false;
+    var g = root.querySelector('[data-part="' + String(partId).replace(/"/g, '') + '"]');
+    if (!g || !g.querySelector) return false;
+    var horn = g.querySelector('path[data-horn]');
+    if (!horn) return false;
+    horn.setAttribute('transform', hornTransform(deg));
+    return true;
   }
 
   /* Live brightness update without rebuilding the whole drawing. */
@@ -907,7 +1306,8 @@ var PcbView = (function () {
       routed.push({ title: c[0] + ' \u2192 ' + c[1], pts: router.route(c[0], c[1], pa, pb) });
     });
     return audit(dia, routed);
-  }, setBrightness: setBrightness, VERSION: '1.0.0' };
+  }, setBrightness: setBrightness, setAngle: setAngle, hornTransform: hornTransform,
+     VERSION: '1.2.0' };
 })();
 /* === PCB-VIEW END === */
 </script>

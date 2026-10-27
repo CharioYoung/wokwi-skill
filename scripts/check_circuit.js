@@ -13,6 +13,11 @@
  *   wires      connections that resolved to real pins and got routed
  *   dangling   connections whose endpoints are not known pins (skipped, not drawn)
  *   crossings  segments that overlap the board footprint (must be 0)
+ *   leads      segments that overlap the board but end on a pin. The pin lead
+ *              itself is allowed to sit on the PCB: a header is inset from the
+ *              board edge, and a part parked on the edge (the 32-servo ring
+ *              does that at every corner) puts its pin inside the footprint.
+ *              Reported so the number is visible, never counted as a failure.
  *   pins       hover hotspots / total header pins (must match - an unhoverable
  *              pin gives no name, and the user is left guessing what it is)
  *   tips       hotspots with an empty <title> (must be 0)
@@ -100,6 +105,7 @@ for (const f of files) {
       (virtual ? ` +${virtual} virtual` : '') +
       (unknown ? ` ${unknown} UNRESOLVED` : '') +
       ` crossings=${v.audit.crossings}` +
+      ` leads=${v.audit.excused || 0}` +
       ` pins=${hotspots.length}/${v.pins.total} (${v.pins.used} wired)` +
       (pinOk ? '' : ' PIN-HINT-MISSING')
   );

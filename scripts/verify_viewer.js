@@ -243,10 +243,15 @@ if (doCompile) {
           return;
         }
         const used = /Sketch uses (\d+) bytes/.exec(out);
-        const binPath = path.join(buildDir, name + '.ino.bin');
-        const binOk = fs.existsSync(binPath) && fs.statSync(binPath).size > 0;
-        if (r.status === 0 && binOk) {
-          pass(`compiles cleanly (${fs.statSync(binPath).size} bytes${used ? `, sketch ${used[1]} B` : ''})`);
+        /* AVR (Uno/Mega/Nano) emits .hex, ESP32 and friends emit .bin. Testing
+           only for .bin reported "compile failed" on a sketch that had just
+           built cleanly, which is exactly the kind of false alarm that trains
+           people to ignore the checker. */
+        const art = ['.ino.bin', '.ino.hex', '.ino.uf2']
+          .map((ext) => path.join(buildDir, name + ext))
+          .find((f) => fs.existsSync(f) && fs.statSync(f).size > 0);
+        if (r.status === 0 && art) {
+          pass(`compiles cleanly (${path.extname(art)} ${fs.statSync(art).size} bytes${used ? `, flash ${used[1]} B` : ''})`);
         } else {
           fail('compile failed');
           console.log(out.split('\n').slice(-15).join('\n'));
