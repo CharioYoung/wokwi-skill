@@ -2,6 +2,8 @@
 
 [中文](README.md) | **English**
 
+[![verify](https://github.com/CharioYoung/wokwi-skill/actions/workflows/verify.yml/badge.svg)](https://github.com/CharioYoung/wokwi-skill/actions/workflows/verify.yml)
+
 > In one sentence: **say what you want, get a circuit that actually runs in Wokwi.**
 
 ```

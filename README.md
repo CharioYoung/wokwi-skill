@@ -2,6 +2,8 @@
 
 **中文** | [English](README.en.md)
 
+[![verify](https://github.com/CharioYoung/wokwi-skill/actions/workflows/verify.yml/badge.svg)](https://github.com/CharioYoung/wokwi-skill/actions/workflows/verify.yml)
+
 > 一句话：**说一句需求，得到一个真的在 Wokwi 里跑起来的电路。**
 
 ```
