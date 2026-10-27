@@ -1,0 +1,4 @@
+[wokwi]
+version = 1
+firmware = "build/ServoOverdone.ino.hex"
+elf = "build/ServoOverdone.ino.elf"

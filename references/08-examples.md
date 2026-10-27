@@ -1,13 +1,18 @@
-# 08 · 两个完整案例
+# 08 · 三个完整案例
 
 **中文** | [English](08-examples.en.md)
 
-两个示例都在 `examples/` 下，**全套文件可跑**（`.ino` + `diagram.json` + `wokwi.toml` + `sim-viewer.html`）。
+三个示例都在 `examples/` 下，**全套文件可跑**（`.ino` + `diagram.json` + `wokwi.toml` + `sim-viewer.html`）。
 
 | 示例 | 覆盖能力 | 难度 |
 |---|---|---|
 | `traffic-light` | 纯 GPIO、状态机、串口可观测 | ★ |
 | `remote-switch` | WiFi + HTTP 服务器 + PWM 呼吸 + 串口命令 | ★★★ |
+| `servo-ring` | Mega 85 脚 + 32 路舵机 + 98 条连线 + 四段动画 | ★★★★★ |
+
+前两个案例在下面逐段拆；第三个是**复杂工程压测**，篇幅原因单独成文，见
+[`examples/servo-ring/README.md`](../examples/servo-ring/README.md)（要点：双排针拐点要按板边算、
+板边零件的引脚引线要单列计数、双列丝印没地方写字、AVR 出 `.hex` 不是 `.bin`）。
 
 ---
 

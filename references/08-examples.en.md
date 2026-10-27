@@ -1,4 +1,4 @@
-# 08 · Two complete worked examples
+# 08 · Three complete worked examples
 
 [中文](08-examples.md) | **English**
 
@@ -8,6 +8,12 @@ Both examples live under `examples/` and are **fully runnable sets** (`.ino` + `
 |---|---|---|
 | `traffic-light` | pure GPIO, state machine, observable serial | ★ |
 | `remote-switch` | WiFi + HTTP server + PWM breathing + serial commands | ★★★ |
+| `servo-ring` | Mega 85 pins + 32 servos + 98 wires + four sequences | ★★★★★ |
+
+The first two are taken apart section by section below. The third is a **complex-project stress test**
+and gets its own page: [`examples/servo-ring/README.en.md`](../examples/servo-ring/README.en.md)
+(highlights: double-row turns must be measured from the board edge, pin leads from parts parked on the
+edge need their own counter, two columns leave no room for silkscreen, and AVR emits `.hex` not `.bin`).
 
 ---
 

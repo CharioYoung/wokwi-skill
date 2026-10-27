@@ -1,0 +1,370 @@
+{
+  "version": 1,
+  "author": "Generated",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "wokwi-arduino-mega",
+      "id": "mega",
+      "top": 270,
+      "left": 185,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo31",
+      "top": 241.47,
+      "left": 594.24,
+      "rotate": 348.75,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo30",
+      "top": 185.19,
+      "left": 577.16,
+      "rotate": 337.50,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo29",
+      "top": 133.33,
+      "left": 549.44,
+      "rotate": 326.25,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo28",
+      "top": 87.87,
+      "left": 512.13,
+      "rotate": 315.00,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo27",
+      "top": 50.56,
+      "left": 466.67,
+      "rotate": 303.75,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo26",
+      "top": 22.84,
+      "left": 414.81,
+      "rotate": 292.50,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo25",
+      "top": 5.76,
+      "left": 358.53,
+      "rotate": 281.25,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo24",
+      "top": 0.00,
+      "left": 300.00,
+      "rotate": 270.00,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo23",
+      "top": 5.76,
+      "left": 241.47,
+      "rotate": 258.75,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo22",
+      "top": 22.84,
+      "left": 185.20,
+      "rotate": 247.50,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo21",
+      "top": 50.56,
+      "left": 133.33,
+      "rotate": 236.25,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo20",
+      "top": 87.87,
+      "left": 87.87,
+      "rotate": 225.00,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo19",
+      "top": 133.33,
+      "left": 50.56,
+      "rotate": 213.75,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo18",
+      "top": 185.19,
+      "left": 22.84,
+      "rotate": 202.50,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo17",
+      "top": 241.47,
+      "left": 5.76,
+      "rotate": 191.25,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo16",
+      "top": 300.00,
+      "left": 0.00,
+      "rotate": 180.00,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo15",
+      "top": 358.53,
+      "left": 5.76,
+      "rotate": 168.75,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo14",
+      "top": 414.80,
+      "left": 22.84,
+      "rotate": 157.50,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo13",
+      "top": 466.67,
+      "left": 50.56,
+      "rotate": 146.25,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo12",
+      "top": 512.13,
+      "left": 87.87,
+      "rotate": 135.00,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo11",
+      "top": 549.44,
+      "left": 133.33,
+      "rotate": 123.75,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo10",
+      "top": 577.16,
+      "left": 185.19,
+      "rotate": 112.50,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo9",
+      "top": 594.24,
+      "left": 241.47,
+      "rotate": 101.25,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo8",
+      "top": 600.00,
+      "left": 300.00,
+      "rotate": 90.00,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo7",
+      "top": 594.24,
+      "left": 358.53,
+      "rotate": 78.75,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo6",
+      "top": 577.16,
+      "left": 414.81,
+      "rotate": 67.50,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo5",
+      "top": 549.44,
+      "left": 466.67,
+      "rotate": 56.25,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo4",
+      "top": 512.13,
+      "left": 512.13,
+      "rotate": 45.00,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo3",
+      "top": 466.67,
+      "left": 549.44,
+      "rotate": 33.75,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo2",
+      "top": 414.81,
+      "left": 577.16,
+      "rotate": 22.50,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo1",
+      "top": 358.53,
+      "left": 594.24,
+      "rotate": 11.25,
+      "attrs": { "hornColor": "Red" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo0",
+      "top": 300.00,
+      "left": 600.00,
+      "rotate": 0.00,
+      "attrs": { "hornColor": "Red" }
+    }
+  ],
+  "connections": [
+    [ "servo0:V+", "servo1:V+", "Red", [] ],
+    [ "servo0:GND", "servo1:GND", "Black", [] ],
+    [ "mega:22", "servo0:PWM", "Green", [ ] ],
+    [ "servo1:V+", "servo2:V+", "Red", [] ],
+    [ "servo1:GND", "servo2:GND", "Black", [] ],
+    [ "mega:23", "servo1:PWM", "Green", [ ] ],
+    [ "servo2:V+", "servo3:V+", "Red", [] ],
+    [ "servo2:GND", "servo3:GND", "Black", [] ],
+    [ "mega:24", "servo2:PWM", "Green", [ ] ],
+    [ "servo3:V+", "servo4:V+", "Red", [] ],
+    [ "servo3:GND", "servo4:GND", "Black", [] ],
+    [ "mega:25", "servo3:PWM", "Green", [ ] ],
+    [ "servo4:V+", "servo5:V+", "Red", [] ],
+    [ "servo4:GND", "servo5:GND", "Black", [] ],
+    [ "mega:26", "servo4:PWM", "Green", [ ] ],
+    [ "servo5:V+", "servo6:V+", "Red", [] ],
+    [ "servo5:GND", "servo6:GND", "Black", [] ],
+    [ "mega:27", "servo5:PWM", "Green", [ ] ],
+    [ "servo6:V+", "servo7:V+", "Red", [] ],
+    [ "servo6:GND", "servo7:GND", "Black", [] ],
+    [ "mega:28", "servo6:PWM", "Green", [ ] ],
+    [ "servo7:V+", "servo8:V+", "Red", [] ],
+    [ "servo7:GND", "servo8:GND", "Black", [] ],
+    [ "mega:29", "servo7:PWM", "Green", [ ] ],
+    [ "servo8:V+", "servo9:V+", "Red", [] ],
+    [ "servo8:GND", "servo9:GND", "Black", [] ],
+    [ "mega:30", "servo8:PWM", "Green", [ ] ],
+    [ "servo9:V+", "servo10:V+", "Red", [] ],
+    [ "servo9:GND", "servo10:GND", "Black", [] ],
+    [ "mega:31", "servo9:PWM", "Green", [ ] ],
+    [ "servo10:V+", "servo11:V+", "Red", [] ],
+    [ "servo10:GND", "servo11:GND", "Black", [] ],
+    [ "mega:32", "servo10:PWM", "Green", [ ] ],
+    [ "servo11:V+", "servo12:V+", "Red", [] ],
+    [ "servo11:GND", "servo12:GND", "Black", [] ],
+    [ "mega:33", "servo11:PWM", "Green", [ ] ],
+    [ "servo12:V+", "servo13:V+", "Red", [] ],
+    [ "servo12:GND", "servo13:GND", "Black", [] ],
+    [ "mega:34", "servo12:PWM", "Green", [ ] ],
+    [ "servo13:V+", "servo14:V+", "Red", [] ],
+    [ "servo13:GND", "servo14:GND", "Black", [] ],
+    [ "mega:35", "servo13:PWM", "Green", [ ] ],
+    [ "servo14:V+", "servo15:V+", "Red", [] ],
+    [ "servo14:GND", "servo15:GND", "Black", [] ],
+    [ "mega:36", "servo14:PWM", "Green", [ ] ],
+    [ "servo15:V+", "servo16:V+", "Red", [] ],
+    [ "servo15:GND", "servo16:GND", "Black", [] ],
+    [ "mega:37", "servo15:PWM", "Green", [ ] ],
+    [ "servo16:V+", "servo17:V+", "Red", [] ],
+    [ "servo16:GND", "servo17:GND", "Black", [] ],
+    [ "mega:38", "servo16:PWM", "Green", [ ] ],
+    [ "servo17:V+", "servo18:V+", "Red", [] ],
+    [ "servo17:GND", "servo18:GND", "Black", [] ],
+    [ "mega:39", "servo17:PWM", "Green", [ ] ],
+    [ "servo18:V+", "servo19:V+", "Red", [] ],
+    [ "servo18:GND", "servo19:GND", "Black", [] ],
+    [ "mega:40", "servo18:PWM", "Green", [ ] ],
+    [ "servo19:V+", "servo20:V+", "Red", [] ],
+    [ "servo19:GND", "servo20:GND", "Black", [] ],
+    [ "mega:41", "servo19:PWM", "Green", [ ] ],
+    [ "servo20:V+", "servo21:V+", "Red", [] ],
+    [ "servo20:GND", "servo21:GND", "Black", [] ],
+    [ "mega:42", "servo20:PWM", "Green", [ ] ],
+    [ "servo21:V+", "servo22:V+", "Red", [] ],
+    [ "servo21:GND", "servo22:GND", "Black", [] ],
+    [ "mega:43", "servo21:PWM", "Green", [ ] ],
+    [ "servo22:V+", "servo23:V+", "Red", [] ],
+    [ "servo22:GND", "servo23:GND", "Black", [] ],
+    [ "mega:44", "servo22:PWM", "Green", [ ] ],
+    [ "servo23:V+", "servo24:V+", "Red", [] ],
+    [ "servo23:GND", "servo24:GND", "Black", [] ],
+    [ "mega:45", "servo23:PWM", "Green", [ ] ],
+    [ "servo24:V+", "servo25:V+", "Red", [] ],
+    [ "servo24:GND", "servo25:GND", "Black", [] ],
+    [ "mega:46", "servo24:PWM", "Green", [ ] ],
+    [ "servo25:V+", "servo26:V+", "Red", [] ],
+    [ "servo25:GND", "servo26:GND", "Black", [] ],
+    [ "mega:47", "servo25:PWM", "Green", [ ] ],
+    [ "servo26:V+", "servo27:V+", "Red", [] ],
+    [ "servo26:GND", "servo27:GND", "Black", [] ],
+    [ "mega:48", "servo26:PWM", "Green", [ ] ],
+    [ "servo27:V+", "servo28:V+", "Red", [] ],
+    [ "servo27:GND", "servo28:GND", "Black", [] ],
+    [ "mega:49", "servo27:PWM", "Green", [ ] ],
+    [ "servo28:V+", "servo29:V+", "Red", [] ],
+    [ "servo28:GND", "servo29:GND", "Black", [] ],
+    [ "mega:50", "servo28:PWM", "Green", [ ] ],
+    [ "servo29:V+", "servo30:V+", "Red", [] ],
+    [ "servo29:GND", "servo30:GND", "Black", [] ],
+    [ "mega:51", "servo29:PWM", "Green", [ ] ],
+    [ "servo30:V+", "servo31:V+", "Red", [] ],
+    [ "servo30:GND", "servo31:GND", "Black", [] ],
+    [ "mega:52", "servo30:PWM", "Green", [ ] ],
+    [ "servo31:V+", "servo0:V+", "Red", [] ],
+    [ "servo31:GND", "servo0:GND", "Black", [] ],
+    [ "mega:53", "servo31:PWM", "Green", [ ] ],
+    [ "mega:GND.2", "servo9:GND", "Black", [ ] ],
+    [ "mega:5V", "servo9:V+", "Red", [ ] ]
+  ]
+}

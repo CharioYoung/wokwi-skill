@@ -172,6 +172,6 @@ wokwi-cli 无头、不建网页工程、截不到全景。让用户"看到并操
 | `references/05-build-and-simulate.md` | 编译失败、仿真参数、观测手段 |
 | `references/06-viewer.md` | 生成/修改 `sim-viewer.html` |
 | `references/07-troubleshooting.md` | 任何报错先查这里 |
-| `references/08-examples.md` | 想看两个跑通的完整案例 |
+| `references/08-examples.md` | 想看三个跑通的完整案例 |
 
-现成可跑工程：`examples/traffic-light/`（纯 GPIO 状态机）、`examples/remote-switch/`（WiFi + HTTP + PWM）。
+现成可跑工程：`examples/traffic-light/`（纯 GPIO 状态机）、`examples/remote-switch/`（WiFi + HTTP + PWM）、`examples/servo-ring/`（Mega + 32 舵机 + 98 条线，复杂工程压测）。

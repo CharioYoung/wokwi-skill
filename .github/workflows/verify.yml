@@ -36,8 +36,10 @@ jobs:
           set -e
           node scripts/verify_viewer.js examples/traffic-light
           node scripts/verify_viewer.js examples/remote-switch
+          node scripts/verify_viewer.js examples/servo-ring
           node scripts/sync_embed.js examples/traffic-light --check
           node scripts/sync_embed.js examples/remote-switch --check
+          node scripts/sync_embed.js examples/servo-ring --check
 
       - name: Circuit renderer is identical in every page
         run: node scripts/sync_pcbview.js --check
@@ -50,3 +52,4 @@ jobs:
           set -e
           node scripts/domrun.js examples/traffic-light/sim-viewer.html
           node scripts/domrun.js examples/remote-switch/sim-viewer.html
+          node scripts/domrun.js examples/servo-ring/sim-viewer.html

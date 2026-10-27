@@ -172,8 +172,8 @@ When the user is unhappy, iterate in this order — `selection → wiring → co
 | `references/05-build-and-simulate.en.md` | Build failures, simulation flags, ways to observe |
 | `references/06-viewer.en.md` | Generating or editing `sim-viewer.html` |
 | `references/07-troubleshooting.en.md` | First place to look for any error |
-| `references/08-examples.en.md` | Want to see the two complete worked examples |
+| `references/08-examples.en.md` | Want to see the three complete worked examples |
 
-Runnable projects included: `examples/traffic-light/` (pure GPIO state machine), `examples/remote-switch/` (WiFi + HTTP + PWM).
+Runnable projects included: `examples/traffic-light/` (pure GPIO state machine), `examples/remote-switch/` (WiFi + HTTP + PWM), `examples/servo-ring/` (Mega + 32 servos + 98 wires, a complex-project stress test).
 
 > Every reference also exists in English with the `.en.md` suffix, e.g. `references/06-viewer.en.md`.
