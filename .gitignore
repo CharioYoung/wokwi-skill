@@ -1,0 +1,30 @@
+# 编译产物
+build/
+*.bin
+*.elf
+*.map
+*.hex
+
+# 仿真产物
+sim-*/
+serial.log
+*.png
+!assets/*.png
+
+# 临时校验目录
+.chk/
+.tmp/
+
+# 密钥（绝不提交）
+*wokwi*token*
+.env
+.env.*
+mcp.json
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+node_modules/

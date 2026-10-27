@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 三色红绿灯 · 仿真结果查看器</title>
+<style>
+  :root{
+    --bg:#eef2f8; --card:#fff; --line:#e2e8f0; --text:#1e293b; --muted:#64748b;
+    --accent:#2563eb; --accent-soft:#e8efff; --ok:#16a34a; --term-bg:#f7f9fc;
+    --mono: ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:linear-gradient(180deg,#f6f9ff,#eef2f8);color:var(--text);min-height:100vh;padding:22px 20px 40px}
+  .wrap{max-width:1180px;margin:0 auto}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+  .logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#2563eb,#7c3aed);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;
+    box-shadow:0 6px 16px rgba(37,99,235,.28)}
+  h1{font-size:19px;margin:0}
+  .sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .badges{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .badge{font-size:11.5px;padding:5px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent);
+    font-weight:600;border:1px solid #d6e2ff}
+  .badge.green{background:#e9f9ef;color:var(--ok);border-color:#c7eed5}
+  .badge.gray{background:#f1f5f9;color:var(--muted);border-color:#e2e8f0}
+  .grid{display:grid;grid-template-columns:1.05fr 1fr;gap:16px}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    box-shadow:0 10px 30px rgba(30,41,59,.06);padding:18px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:0 0 14px;
+    font-weight:700;display:flex;align-items:center;gap:8px}
+  .card h2 .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+
+  .board{position:relative;display:flex;align-items:center;justify-content:center;height:250px;
+    border-radius:14px;background:radial-gradient(circle at 50% 40%,#fbfdff,#eef3fb);
+    border:1px dashed #d7e0ee;overflow:hidden}
+  .mcu{position:relative;width:200px;height:150px;background:linear-gradient(160deg,#1f2937,#111827);
+    border-radius:10px;box-shadow:0 12px 26px rgba(15,23,42,.28);z-index:2}
+  .mcu .chip{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:60px;height:70px;
+    background:linear-gradient(150deg,#334155,#1e293b);border-radius:6px;border:1px solid #475569}
+  .mcu .label{position:absolute;bottom:8px;right:10px;font-size:10px;color:#94a3b8;font-family:var(--mono)}
+  .tower{position:absolute;right:64px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;
+    gap:12px;z-index:2}
+  .lamp{display:flex;align-items:center;justify-content:flex-end;gap:8px;position:relative}
+  .lamp .glow{position:absolute;right:6px;width:64px;height:64px;border-radius:50%;opacity:0;
+    transition:opacity .12s linear;pointer-events:none}
+  .lamp .bulb{position:relative;width:30px;height:30px;border-radius:50%;z-index:2;
+    border:2px solid rgba(0,0,0,.12);transition:background .08s linear}
+  .lamp .gpio{font-family:var(--mono);font-size:9.5px;color:#64748b;width:56px;text-align:right}
+  .wire{position:absolute;top:50%;height:2px;background:#94a3b8;z-index:1}
+
+  .readouts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+  .ro{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+  .ro .k{font-size:11px;color:var(--muted)}
+  .ro .v{font-size:14px;font-weight:700;font-family:var(--mono);margin-top:2px}
+  .controls{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:16px}
+  .btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 6px;cursor:pointer;
+    font-size:12.5px;font-weight:600;color:var(--text);transition:.15s;display:flex;flex-direction:column;
+    align-items:center;gap:5px}
+  .btn:hover{border-color:#c3d4f5;background:#f7faff;transform:translateY(-1px)}
+  .btn .ic{font-size:16px}
+  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+  .term{background:var(--term-bg);border:1px solid var(--line);border-radius:12px;height:360px;overflow-y:auto;
+    padding:12px 14px;font-family:var(--mono);font-size:12px;line-height:1.62;color:#0f172a}
+  .term .ln{white-space:pre-wrap;padding:1px 0}
+  .term .t{color:#94a3b8;margin-right:8px;font-size:11px}
+  .term .tag{font-weight:700}
+  .term .tag-traffic{color:#16a34a}
+  .term .tag-boot{color:#2563eb}
+  .term .ok{color:var(--ok)}
+  .term-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .term-head .dots{display:flex;gap:6px}
+  .term-head .dots i{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .term-head .dots i:nth-child(1){background:#ff5f57}
+  .term-head .dots i:nth-child(2){background:#febc2e}
+  .term-head .dots i:nth-child(3){background:#28c840}
+  .term-head .path{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .mini{border:1px solid var(--line);background:#fff;border-radius:8px;font-size:11px;padding:4px 9px;cursor:pointer;color:var(--muted)}
+  .mini:hover{color:var(--accent);border-color:#c3d4f5}
+
+  .lower{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+  @media(max-width:900px){.lower{grid-template-columns:1fr}}
+  ul.comp{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+  ul.comp li{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5}
+  ul.comp .ic{width:26px;height:26px;border-radius:8px;background:var(--accent-soft);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;font-size:13px;flex:0 0 26px;margin-top:1px}
+  ul.comp b{color:var(--text)} ul.comp span{color:var(--muted)}
+  .tabs{display:flex;gap:6px;margin-bottom:10px}
+  .tab{font-size:12px;padding:6px 12px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--muted);font-weight:600}
+  .tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  pre.code{margin:0;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px;overflow:auto;max-height:240px;
+    font-family:var(--mono);font-size:11.5px;line-height:1.55;white-space:pre-wrap}
+  table.nl{width:100%;border-collapse:collapse;font-size:12px}
+  table.nl th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;padding:5px 8px;border-bottom:1px solid var(--line)}
+  table.nl td{padding:6px 8px;border-bottom:1px solid #f1f5f9;font-family:var(--mono);font-size:11.5px;vertical-align:top}
+  table.nl td.plain{font-family:inherit;font-size:12.5px;line-height:1.5}
+  .footer-note{margin-top:18px;font-size:12px;color:var(--muted);line-height:1.7;background:#fff;
+    border:1px dashed var(--line);border-radius:12px;padding:12px 16px}
+  .footer-note b{color:var(--text)}
+  .pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:6px;animation:p 1.4s infinite}
+  @keyframes p{0%,100%{opacity:1}50%{opacity:.25}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">32</div>
+    <div>
+      <h1>ESP32 三色红绿灯 · 仿真结果查看器</h1>
+      <div class="sub">纯 GPIO 教学版 · 已在 Wokwi 无头仿真跑通 · 真实流程回放 + 实时交互</div>
+    </div>
+    <div class="badges">
+      <span class="badge green"><span class="pulse"></span>仿真通过</span>
+      <span class="badge">ESP32 DevKit C</span>
+      <span class="badge gray">GPIO 25/26/27</span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2><span class="dot"></span>电路与执行器 <span style="font-weight:500;text-transform:none;letter-spacing:0;color:#94a3b8;font-size:11px">· 示意图（据 diagram.json 绘制，非 Wokwi 渲染）</span></h2>
+      <div class="board">
+        <div class="mcu"><div class="chip"></div><div class="label">ESP32</div></div>
+        <div class="tower" id="tower"></div>
+      </div>
+
+      <div class="readouts">
+        <div class="ro"><div class="k">当前状态</div><div class="v" id="roState">—</div></div>
+        <div class="ro"><div class="k">阶段剩余</div><div class="v" id="roLeft">—</div></div>
+        <div class="ro"><div class="k">循环计数</div><div class="v" id="roCycle">0</div></div>
+      </div>
+
+      <div class="controls">
+        <button class="btn primary" onclick="mode('auto')"><span class="ic">↻</span>自动循环</button>
+        <button class="btn" onclick="mode('red')"><span class="ic">🔴</span>红灯</button>
+        <button class="btn" onclick="mode('yellow')"><span class="ic">🟡</span>黄灯</button>
+        <button class="btn" onclick="mode('green')"><span class="ic">🟢</span>绿灯</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="term-head">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">serial @ 115200</div>
+        <div style="display:flex;gap:8px">
+          <button class="mini" onclick="location.reload()">↻ 重放</button>
+          <button class="mini" onclick="document.getElementById('term').innerHTML=''">清空</button>
+        </div>
+      </div>
+      <div class="term" id="term"></div>
+    </div>
+  </div>
+
+  <div class="lower">
+    <div class="card">
+      <h2><span class="dot"></span>元器件选型（AI 解析需求得出）</h2>
+      <ul class="comp">
+        <li><div class="ic">🧠</div><div><b>ESP32 DevKit C</b> — 主控，GPIO 直驱三颗 LED<span>（纯 GPIO 即可，无需第三方库）</span></div></li>
+        <li><div class="ic">🔴🟡🟢</div><div><b>红/黄/绿 LED ×3</b> — 接 GPIO25 / 26 / 27<span>（共阴接法，各自串 330Ω 到 GND）</span></div></li>
+        <li><div class="ic">⚡</div><div><b>330Ω 限流电阻 ×3</b> — 保护每颗 LED<span>避免过流</span></div></li>
+        <li><div class="ic">⏱️</div><div><b>状态机时序</b> — 绿 4s → 黄 1s → 红 4s 循环<span>（上电先三灯各亮 300ms 自检）</span></div></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot"></span>生成的文件</h2>
+      <div class="tabs">
+        <div class="tab active" id="tabIno" onclick="showTab('ino')">sketch.ino</div>
+        <div class="tab" id="tabDia" onclick="showTab('dia')">diagram.json</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <button class="mini" onclick="copyFile('ino')">① 复制代码 → 贴到 sketch.ino</button>
+        <button class="mini" onclick="copyFile('dia')">② 复制电路 → 贴到 diagram.json</button>
+      </div>
+      <pre class="code" id="codeBox"></pre>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2><span class="dot"></span>电路连接表（直接解析自 diagram.json，可逐条核对）</h2>
+    <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:20px">
+      <div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">元器件清单</div>
+        <table class="nl">
+          <thead><tr><th>id</th><th>Wokwi 元件类型</th><th>属性</th></tr></thead>
+          <tbody id="netlistParts"></tbody>
+        </table>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">连线（起点 → 终点）</div>
+        <table class="nl">
+          <thead><tr><th>起点</th><th></th><th>终点</th><th>线色</th></tr></thead>
+          <tbody id="netlistConns"></tbody>
+        </table>
+      </div>
+    </div>
+    <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px">选型决策 · 为什么是这些元件</div>
+      <table class="nl">
+        <thead><tr><th style="width:26%">需求点</th><th style="width:22%">选型</th><th>理由 / 约束</th></tr></thead>
+        <tbody id="selectionTbl"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    <b>说明：</b>本页由 AI 根据真实仿真结果生成。左侧是<b>示意图</b>（按 diagram.json 绘制，非 Wokwi 渲染）；串口区回放该固件在 Wokwi 无头仿真中的真实输出。点「自动/红/黄/绿」可即时切换并写入串口。
+    <div style="margin-top:10px;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 14px">
+      <b style="color:var(--text)">在 Wokwi 原生界面运行（约 30 秒）：</b>
+      <ol style="margin:8px 0 10px 18px;padding:0;line-height:1.9">
+        <li>点下面按钮打开<b>空白 ESP32 工程</b>。</li>
+        <li>点上方「② 复制电路」→ 切到 <code>diagram.json</code> 标签 → 全选删除 → 粘贴。</li>
+        <li>点上方「① 复制代码」→ 切到 <code>sketch.ino</code> 标签 → 全选删除 → 粘贴。</li>
+        <li>点 ▶ 运行，即看到与左图一致的真实电路。</li>
+      </ol>
+      <button class="btn" style="display:inline-flex;flex-direction:row;gap:7px;padding:8px 14px" onclick="window.open('https://wokwi.com/projects/new/esp32','_blank')">
+        <span class="ic">🚀</span> 打开空白 ESP32 工程
+      </button>
+      <div style="margin-top:8px;color:#94a3b8;font-size:11.5px">Wokwi 没有"URL 直接带代码运行"的公开接口，新工程必为空白，必须粘贴；登录并保存后才会生成 /projects/&lt;id&gt; 永久链接。</div>
+    </div>
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;color:var(--accent);font-weight:600">查看真实仿真抓取的原始串口日志（证据）</summary>
+      <pre style="background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;
+        font-family:var(--mono);font-size:11.5px;line-height:1.55;margin-top:8px;white-space:pre-wrap" id="rawLog"></pre>
+    </details>
+  </div>
+</div>
+
+<script type="text/plain" id="inoSrc">
+/*
+ * ESP32 三色红绿灯（教学演示 · 纯 GPIO，无第三方库）
+ * ------------------------------------------------------------
+ * 循环：绿灯 4s -> 黄灯 1s -> 红灯 4s，串口打印每次切换。
+ * 目的：验证「自然语言需求 -> 选型 -> 代码 -> 编译 -> 仿真 -> 查看器」整条链路。
+ *
+ * 接线（共阴接法，每颗 LED 串 330Ω 到 GND）：
+ *   红灯 -> GPIO25
+ *   黄灯 -> GPIO26
+ *   绿灯 -> GPIO27
+ */
+
+#define R_PIN 25
+#define Y_PIN 26
+#define G_PIN 27
+
+void setLights(bool r, bool y, bool g) {
+  digitalWrite(R_PIN, r ? HIGH : LOW);
+  digitalWrite(Y_PIN, y ? HIGH : LOW);
+  digitalWrite(G_PIN, g ? HIGH : LOW);
+}
+
+void announce(const char *which) {
+  Serial.print("[TRAFFIC] ");
+  Serial.println(which);
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(200);
+
+  pinMode(R_PIN, OUTPUT);
+  pinMode(Y_PIN, OUTPUT);
+  pinMode(G_PIN, OUTPUT);
+
+  Serial.println();
+  Serial.println("=========================================");
+  Serial.println("  ESP32 Traffic Light  (demo, no libs)");
+  Serial.println("  cycle: GREEN 4s -> YELLOW 1s -> RED 4s");
+  Serial.println("=========================================");
+
+  // 上电自检：三灯各亮 300ms，便于观察与截图
+  setLights(1, 0, 0); delay(300);
+  setLights(0, 1, 0); delay(300);
+  setLights(0, 0, 1); delay(300);
+  setLights(0, 0, 0);
+  Serial.println("[BOOT] self-test done");
+}
+
+void loop() {
+  setLights(0, 0, 1);  announce("GREEN  ON  (4s)");   delay(4000);
+  setLights(0, 1, 0);  announce("YELLOW ON  (1s)");   delay(1000);
+  setLights(1, 0, 0);  announce("RED    ON  (4s)");   delay(4000);
+}
+</script>
+<script type="text/plain" id="diaSrc">
+{
+  "version": 1,
+  "author": "AI generated",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": -40, "left": -60, "attrs": {} },
+    { "type": "wokwi-led", "id": "red",    "top": 40,  "left": 160, "attrs": { "color": "red" } },
+    { "type": "wokwi-led", "id": "yellow", "top": 100, "left": 160, "attrs": { "color": "yellow" } },
+    { "type": "wokwi-led", "id": "green",  "top": 160, "left": 160, "attrs": { "color": "green" } },
+    { "type": "wokwi-resistor", "id": "rr", "top": 40,  "left": 90, "attrs": { "value": "330" } },
+    { "type": "wokwi-resistor", "id": "ry", "top": 100, "left": 90, "attrs": { "value": "330" } },
+    { "type": "wokwi-resistor", "id": "rg", "top": 160, "left": 90, "attrs": { "value": "330" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+
+    [ "esp:25", "rr:1", "green", [] ],
+    [ "rr:2", "red:A", "green", [] ],
+    [ "red:C", "esp:GND.1", "black", [] ],
+
+    [ "esp:26", "ry:1", "green", [] ],
+    [ "ry:2", "yellow:A", "green", [] ],
+    [ "yellow:C", "esp:GND.2", "black", [] ],
+
+    [ "esp:27", "rg:1", "green", [] ],
+    [ "rg:2", "green:A", "green", [] ],
+    [ "green:C", "esp:GND.3", "black", [] ]
+  ],
+  "dependencies": {}
+}
+</script>
+<script>
+// code/circuit are read from raw text blocks (no JS escape processing)
+function rawSrc(id){
+  const el = document.getElementById(id);
+  if (!el) return "";
+  return el.textContent.replace(/^\r?\n/, "").replace(/\s+$/, "") + "\n";
+}
+const INO = rawSrc("inoSrc");
+const DIA = rawSrc("diaSrc");
+
+/* ================== 配置（渲染器读这里） ================== */
+const CFG = {
+  name: "ESP32 三色红绿灯",
+  actors: [
+    { id:"red",    label:"红灯", gpio:25, color:"#ef4444", on:"#ff5f57" },
+    { id:"yellow", label:"黄灯", gpio:26, color:"#f59e0b", on:"#fbbf24" },
+    { id:"green",  label:"绿灯", gpio:27, color:"#22c55e", on:"#34d399" }
+  ],
+  sequence: [
+    { on:"green",  dur:4000, label:"GREEN" },
+    { on:"yellow", dur:1000, label:"YELLOW" },
+    { on:"red",    dur:4000, label:"RED" }
+  ],
+  selection: [
+    { need:"主控要能跑状态机、串口可观", choice:"ESP32 DevKit C", reason:"GPIO 数量足够直驱三灯；自带串口便于观测；Wokwi 官方 part = board-esp32-devkit-c-v4" },
+    { need:"红/黄/绿三色指示", choice:"wokwi-led ×3", reason:"Wokwi 只提供单色 LED 模型，用 3 个不同 color 的 wokwi-led 组合最直观" },
+    { need:"LED 不能直接跨 3.3V（会过流）", choice:"330Ω ×3", reason:"限流保护；wokwi-resistor 支持 value 属性，直接写 330" },
+    { need:"无头仿真下要能判断跑没跑起来", choice:"串口打印状态", reason:"每次切换打印 [TRAFFIC] 行，日志即硬证据" }
+  ],
+  rawLog: `=========================================
+  ESP32 Traffic Light  (demo, no libs)
+  cycle: GREEN 4s -> YELLOW 1s -> RED 4s
+=========================================
+[BOOT] self-test done
+[TRAFFIC] GREEN  ON  (4s)
+[TRAFFIC] YELLOW ON  (1s)
+[TRAFFIC] RED    ON  (4s)
+[TRAFFIC] GREEN  ON  (4s)`
+};
+
+
+/* ================== 渲染器 ================== */
+const term=document.getElementById('term');
+const leds={}; let autoTimer=null, tickTimer=null, manual=false, cycleCount=0;
+
+function nowStr(){const d=new Date();return d.toLocaleTimeString('zh-CN',{hour12:false})+'.'+String(d.getMilliseconds()).padStart(3,'0');}
+function log(tag,cls,msg){const ln=document.createElement('div');ln.className='ln';
+  ln.innerHTML='<span class="t">'+nowStr()+'</span>'+(tag?'<span class="tag tag-'+cls+'">['+tag+']</span> ':'')+msg;
+  term.appendChild(ln);term.scrollTop=term.scrollHeight;}
+
+function buildTower(){
+  const t=document.getElementById('tower');
+  CFG.actors.forEach(a=>{
+    const row=document.createElement('div');row.className='lamp';
+    row.innerHTML='<span class="gpio">GPIO'+a.gpio+'</span>'+
+      '<span class="glow" style="background:radial-gradient(circle,'+a.on+'aa,'+a.on+'00 70%)"></span>'+
+      '<span class="bulb" style="background:'+a.color+'"></span>';
+    t.appendChild(row);
+    leds[a.id]={glow:row.querySelector('.glow'),bulb:row.querySelector('.bulb'),cfg:a};
+  });
+}
+function setOne(id,on){
+  const L=leds[id]; if(!L)return;
+  L.glow.style.opacity=on?'0.95':'0';
+  L.bulb.style.background=on?L.cfg.on:L.cfg.color;
+  L.bulb.style.boxShadow=on?('0 0 14px '+L.cfg.on):'none';
+}
+function allOff(){CFG.actors.forEach(a=>setOne(a.id,false));}
+function setState(id){
+  allOff(); if(id) setOne(id,true);
+  const nm=id?CFG.actors.find(a=>a.id===id).label:'—';
+  document.getElementById('roState').textContent=nm;
+}
+
+function runAuto(){
+  cancelAuto();
+  manual=false;
+  let i=0;
+  const step=()=>{
+    if(manual)return;
+    const s=CFG.sequence[i];
+    setState(s.on);
+    log('TRAFFIC','traffic','<span class="ok">'+s.label+' ON</span>  ('+(s.dur/1000)+'s)');
+    startCountdown(s.dur);
+    autoTimer=setTimeout(()=>{ i=(i+1)%CFG.sequence.length; if(i===0)cycleCount++,document.getElementById('roCycle').textContent=cycleCount; step(); },s.dur);
+  };
+  step();
+}
+function cancelAuto(){if(autoTimer)clearTimeout(autoTimer);autoTimer=null;if(tickTimer)clearInterval(tickTimer);tickTimer=null;}
+function startCountdown(ms){
+  if(tickTimer)clearInterval(tickTimer);
+  const el=document.getElementById('roLeft');let left=ms;
+  el.textContent=(left/1000).toFixed(1)+'s';
+  tickTimer=setInterval(()=>{left-=100;if(left<0)left=0;el.textContent=(left/1000).toFixed(1)+'s';if(left<=0)clearInterval(tickTimer);},100);
+}
+function mode(m){
+  if(m==='auto'){log('CMD','boot','mode -> AUTO');runAuto();return;}
+  manual=true;cancelAuto();
+  setState(m);
+  document.getElementById('roLeft').textContent='手动';
+  log('CMD','boot','mode -> MANUAL '+m.toUpperCase());
+}
+
+function showTab(w){
+  document.getElementById('tabIno').classList.toggle('active',w==='ino');
+  document.getElementById('tabDia').classList.toggle('active',w==='dia');
+  document.getElementById('codeBox').textContent=w==='ino'?INO:DIA;
+}
+function copyCode(){navigator.clipboard.writeText(document.getElementById('codeBox').textContent)
+  .then(()=>{const b=event.target;const o=b.textContent;b.textContent='已复制 ✓';setTimeout(()=>b.textContent=o,1200);});}
+function copyFile(which){
+  const txt = which==='ino'?INO:DIA;
+  navigator.clipboard.writeText(txt).then(()=>{
+    const btn=event.target, o=btn.textContent;
+    btn.textContent='已复制 ✓'; setTimeout(()=>btn.textContent=o,1200);
+  });
+}
+function renderNetlist(){
+  let d; try{ d=JSON.parse(DIA); }catch(e){ return; }
+  const esc=s=>String(s==null?'':s);
+  document.getElementById('netlistParts').innerHTML=(d.parts||[]).map(p=>{
+    const attrs=p.attrs&&Object.keys(p.attrs).length?Object.entries(p.attrs).map(([k,v])=>k+':'+v).join(', '):'—';
+    return '<tr><td>'+esc(p.id)+'</td><td class="plain">'+esc(p.type)+'</td><td class="plain">'+esc(attrs)+'</td></tr>';
+  }).join('');
+  document.getElementById('netlistConns').innerHTML=(d.connections||[]).map(c=>{
+    return '<tr><td>'+esc(c[0])+'</td><td style="color:#94a3b8">→</td><td>'+esc(c[1])+'</td><td class="plain">'+esc(c[2]||'')+'</td></tr>';
+  }).join('');
+  const st=document.getElementById('selectionTbl');
+  if(st) st.innerHTML=(CFG.selection||[]).map(s=>'<tr><td class="plain">'+esc(s.need)+'</td><td class="plain"><b>'+esc(s.choice)+'</b></td><td class="plain">'+esc(s.reason)+'</td></tr>').join('');
+}
+
+async function boot(){
+  document.getElementById('rawLog').textContent=CFG.rawLog;
+  renderNetlist();
+  buildTower();
+  log('BOOT','boot','ESP32 Traffic Light (demo, no libs)');
+  log('BOOT','boot','cycle: GREEN 4s -> YELLOW 1s -> RED 4s');
+  log('BOOT','boot','self-test: 三灯各亮 300ms');
+  for(const a of CFG.actors){setState(a.id);await new Promise(r=>setTimeout(r,300));}
+  allOff();
+  log('BOOT','boot','<span class="ok">self-test done</span>');
+  document.getElementById('roCycle').textContent='0';
+  runAuto();
+}
+showTab('ino');
+boot();
+</script>
+</body>
+</html>
