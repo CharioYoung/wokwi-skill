@@ -1,5 +1,7 @@
 # 示例 02 · WiFi 网页远程开关 + PWM 呼吸灯
 
+**中文** | [English](README.en.md)
+
 **覆盖能力**：WiFi 连接、HTTP 服务器、LEDC 硬件 PWM、串口命令、复杂可观测性。零第三方库（`WiFi.h`/`WebServer.h` 是 ESP32 核心自带）。
 
 ## 需求

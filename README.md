@@ -1,5 +1,7 @@
 # wokwi-skill
 
+**中文** | [English](README.en.md)
+
 > 一句话：**说一句需求，得到一个真的在 Wokwi 里跑起来的电路。**
 
 ```
@@ -12,6 +14,21 @@ AI：需求解析 → 选型（ESP32 + wokwi-servo + 按键）
 ```
 
 这不是"让 AI 编一段 Arduino 代码给你"。它会**真的编译、真的跑仿真、把真实串口日志和真实 GPIO 行为**还给你，并把过程摊开给你看——包括为什么选这颗芯片、这根线接到哪、这段代码复制到 Wokwi 能不能编译。
+
+---
+
+## 在线演示（点开即渲染，无需安装）
+
+这两页是**真实仿真跑完后生成的查看器**，不是录屏：灯的时序由固件逻辑驱动，串口区回放 Wokwi 无头仿真的原始日志，代码区里的 `sketch.ino` / `diagram.json` 与仓库中实际编译通过的原文逐字节一致。
+
+| 演示 | 说明 | 直接打开 |
+|---|---|---|
+| 🚦 **ESP32 三色红绿灯** | 纯 GPIO、无第三方库，绿 4s → 黄 1s → 红 4s，可手动切灯 | **<https://charioyoung.github.io/wokwi-skill/examples/traffic-light/sim-viewer.html>** |
+| 💡 **ESP32 远程开关 + 呼吸灯** | WiFi + HTTP 服务器 + PWM，`/on` `/off` `/breathe` 端点 | **<https://charioyoung.github.io/wokwi-skill/examples/remote-switch/sim-viewer.html>** |
+
+演示入口页（含两个链接与文档索引）：<https://charioyoung.github.io/wokwi-skill/>
+
+> 为什么不是 wokwi.com 的链接？见下方「常见问题」——wokwi-cli 没有创建网页工程的 API，所以本工程用**真实日志驱动的本地查看器**替代，并内置"复制代码/电路 → 打开 Wokwi 空白工程"的 30 秒迁移按钮。
 
 ---
 
@@ -35,14 +52,14 @@ Wokwi（<https://wokwi.com>）是很棒的在线硬件仿真器，但把它接�
 
 ```powershell
 # Windows PowerShell
-git clone https://github.com/<you>/wokwi-skill.git
+git clone https://github.com/CharioYoung/wokwi-skill.git
 cd wokwi-skill
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 ```bash
 # macOS / Linux
-git clone https://github.com/<you>/wokwi-skill.git
+git clone https://github.com/CharioYoung/wokwi-skill.git
 cd wokwi-skill && ./install.sh
 ```
 
@@ -98,12 +115,15 @@ AI 会按 `SKILL.md` 的六步走完，最后弹出一个可点的结果页。
 ```
 wokwi-skill/
 ├── SKILL.md                     # 技能入口：六步工作流 + 硬约束
+├── SKILL.en.md                  # 英文版技能入口
 ├── README.md
+├── README.en.md                 # 英文版 README
+├── index.html                   # GitHub Pages 首页（在线演示入口）
 ├── LICENSE                       # MIT
 ├── .gitattributes / .gitignore   # 换行符统一 / 产物忽略
 ├── .github/workflows/verify.yml  # CI：语法 + 一致性 + 运行时三重校验
 ├── install.ps1 / install.sh     # 安装到 agent 的 skills 目录
-├── references/                  # 知识库（按需加载）
+├── references/                  # 知识库（按需加载；每篇都有 .en.md 英文版）
 │   ├── 00-quickstart.md         #   10 分钟跑通第一遍
 │   ├── 01-wokwi-primer.md       #   零基础：Wokwi / 开发板 / GPIO / 电路
 │   ├── 02-environment.md        #   工具链安装与排错
@@ -122,9 +142,12 @@ wokwi-skill/
 ├── assets/
 │   └── viewer-template.html     # 配置驱动的结果查看器模板
 └── examples/
-    ├── traffic-light/           # 纯 GPIO 三色红绿灯（全套可跑）
-    └── remote-switch/           # WiFi 网页远程开关 + PWM 呼吸灯（全套可跑）
+    ├── traffic-light/           # 纯 GPIO 三色红绿灯（全套可跑，含 README.en.md）
+    └── remote-switch/           # WiFi 网页远程开关 + PWM 呼吸灯（全套可跑，含 README.en.md）
 ```
+
+> **双语说明**：仓库内所有 `.md` 都有同名的 `.en.md` 英文版（`README.md` ↔ `README.en.md`、`references/06-viewer.md` ↔ `references/06-viewer.en.md`），每篇顶部有 `中文 | English` 互链。
+
 
 ## 工作原理
 

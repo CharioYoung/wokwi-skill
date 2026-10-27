@@ -1,5 +1,7 @@
 # 03 · 选型：从需求到元件清单
 
+**中文** | [English](03-hardware-selection.en.md)
+
 选型的产物必须是**三列表格**，最终写进查看器的 `CFG.selection`：
 
 | 需求点 | 选型 | 理由 / 约束 |

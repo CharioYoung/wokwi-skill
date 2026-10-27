@@ -1,5 +1,7 @@
 # 04 · diagram.json 格式速查（写之前必读）
 
+**中文** | [English](04-diagram-schema.en.md)
+
 `diagram.json` 是电路的唯一描述文件。Wokwi 用它画出板子和连线，仿真器用它计算电学连接。**格式错一个字符，元件就不显示或连线不通。**
 
 ---

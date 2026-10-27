@@ -1,5 +1,7 @@
 # 02 · 环境安装（Windows / macOS / Linux）
 
+**中文** | [English](02-environment.en.md)
+
 目标：让 `check-env` 全绿。全程约 20–40 分钟，主要时间花在下载 ESP32 核心（约 300MB）。
 
 **先跑自检，缺什么补什么**，不要盲目照着装一遍：

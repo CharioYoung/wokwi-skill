@@ -1,6 +1,6 @@
 ---
 name: wokwi-builder
-description: 用自然语言在 Wokwi 在线仿真器里搭建、编译并运行 ESP32 / Arduino / 树莓派 Pico 电路，支持从零基础起步。当用户说 "wokwi: ..."、"用 wokwi 模拟..."、"生成一个 wokwi 项目/电路"、"在 wokwi 里跑一下..."，或提到 ESP32/LED 呼吸灯/按键/传感器/舵机/OLED/温湿度/远程开关等硬件仿真需求时使用。负责需求→选型→diagram.json+sketch.ino→本地编译→Wokwi 无头仿真→回收串口日志→生成可交互结果查看器，全链路闭环。
+description: 用自然语言在 Wokwi 在线仿真器里搭建、编译并运行 ESP32 / Arduino / 树莓派 Pico 电路，支持从零基础起步。当用户说 "wokwi: ..."、"用 wokwi 模拟..."、"生成一个 wokwi 项目/电路"、"在 wokwi 里跑一下..."，或提到 ESP32/LED 呼吸灯/按键/传感器/舵机/OLED/温湿度/远程开关等硬件仿真需求时使用。负责需求→选型→diagram.json+sketch.ino→本地编译→Wokwi 无头仿真→回收串口日志→生成可交互结果查看器，全链路闭环。 / Build, compile and run ESP32 / Arduino / Raspberry Pi Pico circuits in the Wokwi online simulator from natural language. Use when the user says "wokwi: ...", "simulate with wokwi", "generate a wokwi project/circuit", or mentions ESP32, breathing LED, button, sensor, servo, OLED, temperature/humidity or a web remote switch. Owns the full loop: requirement → part selection → diagram.json + sketch.ino → local build → headless Wokwi simulation → serial log capture → interactive result viewer.
 license: MIT
 metadata:
   version: "1.0.0"
@@ -9,6 +9,8 @@ metadata:
 ---
 
 # Wokwi Builder
+
+**中文** | [English](SKILL.en.md)
 
 把一句自然语言需求变成**真的在 Wokwi 里跑起来**的电路工程，并把运行结果以可交互页面交付。
 

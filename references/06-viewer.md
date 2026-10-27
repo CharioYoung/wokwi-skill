@@ -1,5 +1,7 @@
 # 06 · 结果查看器：让"无头仿真"变成能看能点的页面
 
+**中文** | [English](06-viewer.en.md)
+
 ## 为什么需要它
 
 `wokwi-cli` 是 headless 工具：

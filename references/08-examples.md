@@ -1,5 +1,7 @@
 # 08 · 两个完整案例
 
+**中文** | [English](08-examples.en.md)
+
 两个示例都在 `examples/` 下，**全套文件可跑**（`.ino` + `diagram.json` + `wokwi.toml` + `sim-viewer.html`）。
 
 | 示例 | 覆盖能力 | 难度 |
