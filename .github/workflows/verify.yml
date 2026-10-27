@@ -1,0 +1,44 @@
+name: verify
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Script syntax (JS + shell)
+        run: |
+          set -e
+          for f in scripts/*.js; do echo "node --check $f"; node --check "$f"; done
+          for f in scripts/*.sh install.sh; do echo "bash -n $f"; bash -n "$f"; done
+
+      - name: PowerShell files are pure ASCII
+        run: |
+          set -e
+          for f in scripts/*.ps1 install.ps1; do
+            if LC_ALL=C grep -qP '[^\x00-\x7F]' "$f"; then
+              echo "::error file=$f::contains non-ASCII characters (PowerShell 5.1 will fail to parse it)"
+              exit 1
+            fi
+          done
+
+      - name: Viewers embed the real sources
+        run: |
+          set -e
+          node scripts/verify_viewer.js examples/traffic-light
+          node scripts/verify_viewer.js examples/remote-switch
+
+      - name: Viewer runtime smoke test
+        run: |
+          set -e
+          node scripts/domrun.js examples/traffic-light/sim-viewer.html
+          node scripts/domrun.js examples/remote-switch/sim-viewer.html
