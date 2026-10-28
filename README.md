@@ -1,58 +1,59 @@
 # wokwi-skill
 
-**中文** | [English](README.en.md)
+[中文](README.zh.md) | **English**
 
 [![verify](https://github.com/CharioYoung/wokwi-skill/actions/workflows/verify.yml/badge.svg)](https://github.com/CharioYoung/wokwi-skill/actions/workflows/verify.yml)
 
-> 一句话：**说一句需求，得到一个真的在 Wokwi 里跑起来的电路。**
+> In one sentence: **say what you want, get a circuit that actually runs in Wokwi.**
 
 ```
-你：wokwi: 做一个按键控制的舵机云台，按下转 90 度，再按回 0 度
-AI：需求解析 → 选型（ESP32 + wokwi-servo + 按键）
-    → 生成 diagram.json / sketch.ino
-    → 本地 arduino-cli 编译（947KB 固件）
-    → wokwi-cli 无头仿真，抓回真实串口日志
-    → 生成可交互查看器并弹出：舵机真的在转、串口在滚、接线表可逐条核对
+You: wokwi: a button-controlled servo pan mount — press to 90 degrees, press again to 0
+AI:  parse intent → pick parts (ESP32 + wokwi-servo + pushbutton)
+     → write diagram.json / sketch.ino
+     → compile locally with arduino-cli (947 KB firmware)
+     → run a headless wokwi-cli simulation and capture the real serial log
+     → generate an interactive viewer and open it: the servo really turns,
+       the serial console really scrolls, every wire can be checked line by line
 ```
 
-这不是"让 AI 编一段 Arduino 代码给你"。它会**真的编译、真的跑仿真、把真实串口日志和真实 GPIO 行为**还给你，并把过程摊开给你看——包括为什么选这颗芯片、这根线接到哪、这段代码复制到 Wokwi 能不能编译。
+This is not "ask a model to write some Arduino code". It **compiles for real, simulates for real, and hands back the real serial log plus real GPIO behaviour** — and lays the process open: why this chip, where this wire goes, and whether the code you copy into Wokwi will actually build.
 
 ---
 
-## 在线演示（点开即渲染，无需安装）
+## Live demos (click and it renders — nothing to install)
 
-这四页是**真实仿真跑完后生成的查看器**，不是录屏：灯的时序由固件逻辑驱动，串口区回放 Wokwi 无头仿真的原始日志，代码区里的 `sketch.ino` / `diagram.json` 与仓库中实际编译通过的原文逐字节一致。
+All four pages are **viewers produced after a real simulation run**, not screen recordings: lamp timing is driven by the firmware's own logic, the serial panel replays the raw log from a headless Wokwi run, and the `sketch.ino` / `diagram.json` embedded in the code panel are byte-identical to the sources that compiled.
 
-| 演示 | 说明 | 直接打开 |
+| Demo | What it shows | Open it |
 |---|---|---|
-| 🚦 **ESP32 三色红绿灯** | 纯 GPIO、无第三方库，绿 4s → 黄 1s → 红 4s，可手动切灯 | **<https://charioyoung.github.io/wokwi-skill/examples/traffic-light/sim-viewer.html>** |
-| 💡 **ESP32 远程开关 + 呼吸灯** | WiFi + HTTP 服务器 + PWM，`/on` `/off` `/breathe` 端点 | **<https://charioyoung.github.io/wokwi-skill/examples/remote-switch/sim-viewer.html>** |
-| 🎡 **32 舵机环形阵列（Mega）** | 33 个元件、98 条连线、四段可点动画；`diagram.json` 由真实仿真打印，逐字节一致 | **<https://charioyoung.github.io/wokwi-skill/examples/servo-ring/sim-viewer.html>** |
-| 🦆 **小鸭机器人（多执行器）** | 9 元件 18 条线：LED 眼 + 舵机腿 + 蜂鸣器 + HC-SR04，零第三方库；`scenario.yaml` 注入距离，日志里能证明避障分支真跑过 | **<https://charioyoung.github.io/wokwi-skill/examples/duck-robot/sim-viewer.html>** |
+| 🚦 **ESP32 traffic light** | Pure GPIO, no third-party library. 4 s green → 1 s yellow → 4 s red, manual override | **<https://charioyoung.github.io/wokwi-skill/examples/traffic-light/sim-viewer.html>** |
+| 💡 **ESP32 remote switch + breathing LED** | WiFi + HTTP server + PWM, `/on` `/off` `/breathe` endpoints | **<https://charioyoung.github.io/wokwi-skill/examples/remote-switch/sim-viewer.html>** |
+| 🎡 **32-servo ring (Mega)** | 33 parts, 98 connections, four clickable sequences; the `diagram.json` was printed by a real simulation and matches byte for byte | **<https://charioyoung.github.io/wokwi-skill/examples/servo-ring/sim-viewer.html>** |
+| 🦆 **Duck robot (many actuators)** | 9 parts, 18 wires: LED eyes + servo legs + buzzer + HC-SR04, zero third-party libraries; `scenario.yaml` drives the distance so the log proves the avoid branch ran | **<https://charioyoung.github.io/wokwi-skill/examples/duck-robot/sim-viewer.html>** |
 
-演示入口页（含四个链接与文档索引）：<https://charioyoung.github.io/wokwi-skill/>
+Landing page with all four links and the doc index: <https://charioyoung.github.io/wokwi-skill/>
 
-> 为什么不是 wokwi.com 的链接？见下方「常见问题」——wokwi-cli 没有创建网页工程的 API，所以本工程用**真实日志驱动的本地查看器**替代，并内置"复制代码/电路 → 打开 Wokwi 空白工程"的 30 秒迁移按钮。
+> Why not a wokwi.com link? See the FAQ below — `wokwi-cli` has no API for creating a web project, so this project ships a **viewer driven by real logs** instead, plus a 30-second migration path ("copy code / copy circuit" → "open a blank Wokwi project").
 
 ---
 
-## 这个 skill 解决什么
+## What problem this skill solves
 
-Wokwi（<https://wokwi.com>）是很棒的在线硬件仿真器，但把它接进 AI 工作流有三个硬坑，本 skill 全部踩过并给出可复现解法：
+Wokwi (<https://wokwi.com>) is a great online hardware simulator, but wiring it into an AI workflow hits three hard walls. This project hit all of them and ships reproducible fixes:
 
-| 坑 | 真相 | 本 skill 的解法 |
+| Wall | The truth | How this skill fixes it |
 |---|---|---|
-| AI 生成的代码贴到 Wokwi 编译不过 | 模型爱"精简展示版"，删掉函数定义 | **编译原文 + 逐字节回归校验**（`scripts/verify_viewer.js`） |
-| `wokwi-cli` 跑不起来 | 它**不编译 ESP32 Arduino**，必须自带固件 | `scripts/compile.ps1` 一键本地编译，含中文路径规避 |
-| 全程"无头"，看不到效果 | CLI 只回串口；截图只对有 framebuffer 的屏有效 | **可交互结果查看器**（真实日志回放 + 动画 + 按钮） |
+| AI-generated code won't compile in Wokwi | Models love to "simplify for display" and drop function definitions | **Verbatim source + byte-for-byte regression check** (`scripts/verify_viewer.js`) |
+| `wokwi-cli` won't run | It does **not compile ESP32 Arduino** — you must supply a firmware binary | `scripts/compile.ps1` builds locally in one step, with non-ASCII path avoidance |
+| Everything is "headless", you never see it | The CLI only returns serial output; screenshots only work on parts with a framebuffer | **Interactive result viewer** (real log replay + animation + buttons) |
 
-还有一个隐藏坑：把 C 代码塞进 JS 模板字符串后，`'\n'` 被 JS 解释成真换行，用户复制过去必然报 `missing terminating ' character`。这类"看着对、复制就错"的问题，本工程用原始文本块 + 运行时假 DOM 校验彻底堵住。
+There is also a hidden trap: putting C code inside a JS template literal makes `'\n'` become a real newline, so whatever the user copies is guaranteed to fail with `missing terminating ' character`. This class of "looks right, breaks when copied" bug is closed off completely here with raw text blocks plus a runtime fake-DOM check.
 
 ---
 
-## 快速开始
+## Quick start
 
-### 1. 装 skill
+### 1. Install the skill
 
 ```powershell
 # Windows PowerShell
@@ -67,144 +68,143 @@ git clone https://github.com/CharioYoung/wokwi-skill.git
 cd wokwi-skill && ./install.sh
 ```
 
-安装脚本会把工程复制到 `~/.workbuddy/skills/wokwi-builder`（或 `~/.claude/skills/wokwi-builder`），并保留 `references/`、`scripts/`、`assets/`。
+The installer copies the project to `~/.workbuddy/skills/wokwi-builder` (or `~/.claude/skills/wokwi-builder`) and keeps `references/`, `scripts/` and `assets/`.
 
-### 2. 装工具链（只做一次）
+### 2. Install the toolchain (once)
 
 ```bash
-powershell -ExecutionPolicy Bypass -File scripts/check-env.ps1   # 先看缺什么
+powershell -ExecutionPolicy Bypass -File scripts/check-env.ps1   # see what is missing
 ```
 
-按 `references/02-environment.md` 补齐三样：`wokwi-cli`（+ token）、`arduino-cli`、`esp32` 核心。全 `PASS` 即可。
+Follow `references/02-environment.md` to fill in three things: `wokwi-cli` (+ token), `arduino-cli`, and the `esp32` core. All `PASS` means you are done.
 
-### 3. 说需求
+### 3. Ask for something
 
-在支持 skills 的 AI 客户端里直接说：
+In any AI client that supports skills:
 
 ```
-wokwi: 我想设计一款语音控制空调开关的控制器
-wokwi: 做一个温湿度 + OLED 显示的桌面小屏
-wokwi: 用 ESP32 做个红绿灯，绿灯4秒黄灯1秒红灯4秒
+wokwi: design a voice-controlled air conditioner switch
+wokwi: a small desktop display with temperature/humidity + OLED
+wokwi: an ESP32 traffic light, green 4s, yellow 1s, red 4s
 ```
 
-AI 会按 `SKILL.md` 的六步走完，最后弹出一个可点的结果页。
+The AI follows the six steps in `SKILL.md` and ends by opening a clickable result page.
 
-### 4. 不想装任何东西？
+### 4. Don't want to install anything?
 
-也能用。让 AI 只产出 `sketch.ino` + `diagram.json`，你自己去 wokwi.com 新建 ESP32 工程粘贴运行——`references/00-quickstart.md` 有 5 步图解说明。
+That works too. Ask the AI to produce only `sketch.ino` + `diagram.json`, then create an ESP32 project on wokwi.com yourself and paste them in — `references/00-quickstart.md` has a five-step walkthrough with screenshots of the UI.
 
 ---
 
-## 它能做什么 / 不能做什么
+## What it can and cannot do
 
-**能做**（已验证跑通）
+**Can do** (verified end to end)
 
-- 纯 GPIO 状态机：红绿灯、流水灯、按键消抖
-- PWM：呼吸灯、调光、舵机角度
-- WiFi + HTTP：网页远程开关、状态查询
-- I2C：SSD1306 OLED 文字显示
-- 模拟量：电位器、光敏电阻、DHT11/22 温湿度
-- 无模型器件降级：等效替代 / 串口注入 / 标注"仿真外"
+- Pure GPIO state machines: traffic light, running lights, button debouncing
+- PWM: breathing LED, dimming, servo angles
+- WiFi + HTTP: web remote switch, status queries
+- I2C: SSD1306 OLED text output
+- Analog input: potentiometer, photoresistor, DHT11/22 temperature and humidity
+- Fallbacks for parts Wokwi has no model for: equivalent substitutes / serial injection / explicitly marked "out of simulation scope"
 
-**不能做**（会如实告诉你，不假装跑通）
+**Cannot do** (it will say so plainly instead of pretending)
 
-- 自动在 wokwi.com 建网页工程并给你一个可访问 URL（CLI 无此 API，浏览器自动化在受限网络下会被拦）
-- 真实时序精度要求极高的项目（本地仿真约 1.5–5 倍慢于墙钟）
-- Wokwi 元件库里根本没有的器件（如特定型号语音芯片，需降级方案）
+- Create a wokwi.com web project automatically and hand you a public URL (the CLI has no such API, and browser automation gets blocked on restricted networks)
+- Projects with very tight real-time requirements (local simulation runs roughly 1.5–5× slower than wall clock)
+- Parts that simply do not exist in Wokwi's component library (e.g. some specific voice chips — those need a fallback plan)
 
 ---
 
-## 目录结构
+## Repository layout
 
 ```
 wokwi-skill/
-├── SKILL.md                     # 技能入口：六步工作流 + 硬约束
-├── SKILL.en.md                  # 英文版技能入口
-├── README.md
-├── README.en.md                 # 英文版 README
-├── index.html                   # GitHub Pages 首页（在线演示入口）
+├── SKILL.md                     # Skill entry point: six-step workflow + hard rules (English, default)
+├── SKILL.zh.md                  # Chinese version of the skill entry point
+├── README.md                    # English (this file)
+├── README.zh.md                 # Chinese
+├── index.html                   # GitHub Pages landing page (live demos)
 ├── LICENSE                       # MIT
-├── .gitattributes / .gitignore   # 换行符统一 / 产物忽略
-├── .github/workflows/verify.yml  # CI：语法 + 一致性 + 运行时三重校验
-├── install.ps1 / install.sh     # 安装到 agent 的 skills 目录
-├── references/                  # 知识库（按需加载；每篇都有 .en.md 英文版）
-│   ├── 00-quickstart.md         #   10 分钟跑通第一遍
-│   ├── 01-wokwi-primer.md       #   零基础：Wokwi / 开发板 / GPIO / 电路
-│   ├── 02-environment.md        #   工具链安装与排错
-│   ├── 03-hardware-selection.md #   选型决策树 + 降级策略
-│   ├── 04-diagram-schema.md     #   diagram.json 格式与元件表（写前必读）
-│   ├── 05-build-and-simulate.md #   编译、仿真参数、观测手段
-│   ├── 06-viewer.md             #   结果查看器规范（六条铁律）
-│   ├── 07-troubleshooting.md    #   错误百科（12 个真实案例）
-│   └── 08-examples.md           #   完整案例讲解
+├── .gitattributes / .gitignore   # line-ending normalisation / ignored artifacts
+├── .github/workflows/verify.yml  # CI: syntax + consistency + runtime, three-way check
+├── install.ps1 / install.sh     # install into an agent's skills directory
+├── references/                  # knowledge base (loaded on demand; every file has a .zh.md twin)
+│   ├── 00-quickstart.md         #   get through the first run in 10 minutes
+│   ├── 01-wokwi-primer.md       #   zero background: Wokwi / boards / GPIO / circuits
+│   ├── 02-environment.md        #   toolchain install and repair
+│   ├── 03-hardware-selection.md #   selection decision tree + fallback strategy
+│   ├── 04-diagram-schema.md     #   diagram.json format and part table (read before writing)
+│   ├── 05-build-and-simulate.md #   compiling, simulation flags, ways to observe
+│   ├── 06-viewer.md             #   viewer spec (the hard rules, incl. §3.4 "things not to do")
+│   ├── 07-troubleshooting.md    #   error encyclopaedia (12 real cases)
+│   └── 08-examples.md           #   full walkthrough of the examples
 ├── scripts/
-│   ├── check-env.ps1 / .sh      # 环境自检
-│   ├── compile.ps1 / compile.sh # 参数化编译（ASCII 路径规避）
-│   ├── simulate.ps1 / .sh       # 跑仿真 + 断言关键日志
-│   ├── verify_viewer.js         # 查看器代码一致性 + 可编译性校验
-│   ├── domrun.js                # 假 DOM 运行时校验（抓 undefined 崩）
-│   ├── pcbview.js               # 电路渲染器：diagram.json → 真实板卡/引脚/连线
-│   ├── sync_pcbview.js          # 把 pcbview.js 内联进所有页面（--check 供 CI）
-│   └── sync_embed.js            # 把真实 .ino / diagram.json 写进页面（--check 供 CI）
+│   ├── check-env.ps1 / .sh      # environment self-check
+│   ├── compile.ps1 / compile.sh # parameterised build (ASCII path avoidance)
+│   ├── simulate.ps1 / .sh       # run a simulation + assert on key log lines
+│   ├── verify_viewer.js         # viewer code consistency + compilability check
+│   ├── domrun.js                # fake-DOM runtime check (catches undefined crashes)
+│   ├── pcbview.js               # circuit renderer: diagram.json -> real board/pins/wires
+│   ├── sync_pcbview.js          # inline pcbview.js into every page (--check for CI)
+│   └── sync_embed.js            # write the real .ino / diagram.json into a page (--check for CI)
 ├── assets/
-│   └── viewer-template.html     # 配置驱动的结果查看器模板
+│   └── viewer-template.html     # config-driven result viewer template
 └── examples/
-    ├── traffic-light/           # 纯 GPIO 三色红绿灯（全套可跑，含 README.en.md）
-    ├── remote-switch/           # WiFi 网页远程开关 + PWM 呼吸灯（全套可跑，含 README.en.md）
-    ├── servo-ring/              # 32 舵机环形阵列 + Mega 85 脚（复杂工程压测，含 README.en.md）
-    └── duck-robot/              # 小鸭机器人：LED/舵机/蜂鸣器/超声波 4 类外设（含 README.en.md）
+    ├── traffic-light/           # pure GPIO traffic light (fully runnable, has README.md + README.zh.md)
+    ├── remote-switch/           # WiFi web remote switch + PWM breathing LED (fully runnable, has README.md + README.zh.md)
+    ├── servo-ring/              # 32-servo ring on a Mega, 85 pins (complex-project stress test, has README.md + README.zh.md)
+    └── duck-robot/              # Duck robot: LED / servo / buzzer / ultrasonic in one sketch (has README.md + README.zh.md)
 ```
 
-> **双语说明**：仓库内所有 `.md` 都有同名的 `.en.md` 英文版（`README.md` ↔ `README.en.md`、`references/06-viewer.md` ↔ `references/06-viewer.en.md`），每篇顶部有 `中文 | English` 互链。
+> **Bilingual**: the default `.md` in this repository is English; every one has a `.zh.md` Chinese twin (`README.md` ↔ `README.zh.md`, `references/06-viewer.md` ↔ `references/06-viewer.zh.md`), and each file links to its counterpart at the top via `中文 | English`.
 
-
-## 工作原理
+## How it works
 
 ```
-自然语言
+natural language
    │
-   ├─ 选型 ──────────── references/03-hardware-selection.md（决策树 + 元件表）
+   ├─ select ─────────── references/03-hardware-selection.md (decision tree + part table)
    │
-   ├─ 产出 ──────────── sketch.ino + diagram.json + wokwi.toml
+   ├─ produce ────────── sketch.ino + diagram.json + wokwi.toml
    │
-   ├─ 编译 ──────────── arduino-cli（本地，ESP32 必须自带固件）
-   │                      └─ 失败 → references/07-troubleshooting.md
+   ├─ compile ────────── arduino-cli (local; ESP32 must ship its own firmware)
+   │                        └─ on failure → references/07-troubleshooting.md
    │
-   ├─ 仿真 ──────────── wokwi-cli --timeout N --serial-log-file log
-   │                      └─ 验收 = 日志里的断言，不是"看起来跑过了"
+   ├─ simulate ───────── wokwi-cli --timeout N --serial-log-file log
+   │                        └─ acceptance = assertions on the log, not "it looked like it ran"
    │
-   └─ 交付 ──────────── sim-viewer.html（真实日志回放 + 动画 + 交互）
-                          └─ 三重校验：逐字节一致 / 可编译 / 运行时 0 错误
+   └─ deliver ────────── sim-viewer.html (real log replay + animation + interaction)
+                            └─ three checks: byte-identical / compiles / zero runtime errors
 ```
 
-## 环境要求
+## Requirements
 
-| 依赖 | 版本 | 用途 | 是否必需 |
+| Dependency | Version | Purpose | Required? |
 |---|---|---|---|
-| `wokwi-cli` | ≥ 0.29 | 无头仿真、MCP server | 自动跑仿真时必需 |
-| `WOKWI_CLI_TOKEN` | `wok_` 开头 | 认证（wokwi.com 个人页生成） | 同上 |
-| `arduino-cli` | ≥ 1.0 | 编译 ESP32 Arduino 固件 | ESP32 项目必需 |
-| esp32 核心 | 3.x | 板级支持包（约 300MB） | 同上 |
-| Node.js | ≥ 18 | 校验脚本、查看器校验 | 推荐 |
+| `wokwi-cli` | ≥ 0.29 | headless simulation, MCP server | yes, to run simulations automatically |
+| `WOKWI_CLI_TOKEN` | starts with `wok_` | authentication (generate on your wokwi.com profile page) | same as above |
+| `arduino-cli` | ≥ 1.0 | build ESP32 Arduino firmware | yes, for ESP32 projects |
+| esp32 core | 3.x | board support package (~300 MB) | same as above |
+| Node.js | ≥ 18 | verification scripts, viewer checks | recommended |
 
-纯生成模式（只出文件、用户自己去网页粘贴）**不需要任何依赖**。
+Generation-only mode (just produce the files and paste them into the web editor yourself) **needs no dependencies at all**.
 
-## 常见问题
+## FAQ
 
-**Q：为什么不直接调 Wokwi 的云端编译？**
-ESP32 Arduino 项目 wokwi-cli 不做云端编译（ESP-IDF/Pico 才支持自动推断）。这是工具定位，不是配置问题——所以本工程内置本地编译链路。
+**Q: Why not use Wokwi's cloud compiler directly?**
+For ESP32 Arduino projects `wokwi-cli` does not compile in the cloud (only ESP-IDF/Pico support automatic inference). That is the tool's design, not a configuration mistake — which is why this project ships a local build chain.
 
-**Q：为什么结果是个本地页面，不是 wokwi.com 的链接？**
-wokwi-cli 没有创建网页工程的 API。本地查看器用**真实串口日志**驱动，能看、能点、能核对接线，比等一个不存在的 URL 更实在。想要原生体验，查看器里有"复制代码/电路"和"打开空白工程"按钮，30 秒粘完。
+**Q: Why is the result a local page instead of a wokwi.com link?**
+`wokwi-cli` has no API for creating a web project. The local viewer is driven by the **real serial log**: you can look at it, click it, and verify every wire — which beats waiting for a URL that will never exist. If you want the native experience, the viewer has "copy code / copy circuit" and "open a blank project" buttons; 30 seconds and you're there.
 
-**Q：AI 改坏了页面怎么办？**
-`scripts/domrun.js` 会用假 DOM 真跑一遍初始化，输出灯数/表格/错误数。错误数不为 0 就不许交付——这条已写进 `SKILL.md` 的铁律。
+**Q: What if the AI breaks a page?**
+`scripts/domrun.js` really executes the initialisation in a fake DOM and reports lamp count, table content and error count. A non-zero error count blocks delivery — this is written into the hard rules in `SKILL.md`.
 
-## 贡献
+## Contributing
 
-欢迎 PR：新增示例工程（`examples/`）、补充 `references/07-troubleshooting.md` 的真实报错、扩充元件表。
-提 issue 请附上 `check-env` 输出与完整报错，不要只贴一行。
+PRs are welcome: new example projects (`examples/`), real error messages for `references/07-troubleshooting.md`, and additions to the part table.
+When filing an issue, include the `check-env` output and the full error — not just a single line.
 
 ## License
 
-MIT — 见 [LICENSE](LICENSE)。
+MIT — see [LICENSE](LICENSE).

@@ -1,120 +1,120 @@
-# 01 · 零基础：Wokwi、开发板与电路
+# 01 · From zero: Wokwi, dev boards and circuits
 
-**中文** | [English](01-wokwi-primer.en.md)
+[中文](01-wokwi-primer.zh.md) | **English**
 
-这一篇假设你**从没接过一根线、没写过一行单片机代码**。读完你能看懂 AI 生成的工程，也能自己判断它有没有胡说。
+This document assumes you have **never connected a wire or written a line of microcontroller code**. After reading it you will be able to follow the project the AI generates — and judge whether it is making things up.
 
 ---
 
-## 1. Wokwi 是什么
+## 1. What Wokwi is
 
-Wokwi 是一个**跑在浏览器里的电子电路仿真器**。你在网页里画电路、写固件、点运行，它就模拟出真实的电学行为：
+Wokwi is an **electronics circuit simulator that runs in the browser**. You draw a circuit, write firmware and press run; it simulates real electrical behaviour:
 
-- LED 会亮，亮度和颜色跟电流有关；
-- 串口监视器会滚动打印，跟真板子接 USB 一样；
-- 按键能按、电位器能拧、OLED 屏幕会显示；
-- **WiFi 也能模拟**：ESP32 会拿到一个虚拟 IP（通常是 `10.13.37.2`），能在仿真内置浏览器里访问它跑的网页。
+- LEDs light up, and brightness/colour depend on current;
+- the serial monitor scrolls, exactly like a real board plugged into USB;
+- buttons can be pressed, potentiometers turned, OLED screens display;
+- **WiFi is simulated too**: the ESP32 gets a virtual IP (usually `10.13.37.2`) and you can open the web page it serves from the built-in browser.
 
-它**不是**在云端跑你的电脑，而是在浏览器里跑一个编译好的 CPU 模拟器 + 电路求解器。
+It does **not** run your PC in the cloud — it runs a compiled CPU emulator plus a circuit solver inside the browser.
 
-### 它能模拟什么、不能模拟什么
+### What it can and cannot simulate
 
-| 能 | 不能 |
+| Can | Cannot |
 |---|---|
-| 数字电平（高低电平、按键、LED、继电器） | 真实模拟电路精度（噪声、温漂、EMI） |
-| PWM（呼吸灯、舵机角度） | 严格实时（本地仿真比真机慢 **1.5–5 倍**） |
-| ADC（电位器、光敏电阻） | 未建模的器件（Wokwi 元件库有限） |
-| I2C / SPI / UART（OLED、DHT、SD 卡） | 需要外部服务的复杂协议（部分可） |
-| WiFi + HTTP + MQTT（虚拟网络） | 真实外网访问（虚拟网只在仿真空内） |
+| Digital levels (high/low, buttons, LEDs, relays) | Analogue-circuit accuracy (noise, thermal drift, EMI) |
+| PWM (breathing LED, servo angles) | Strict real time (local simulation is **1.5–5× slower** than hardware) |
+| ADC (potentiometer, photoresistor) | Parts with no model (Wokwi's library is finite) |
+| I2C / SPI / UART (OLED, DHT, SD card) | Complex protocols that need external services (partially possible) |
+| WiFi + HTTP + MQTT (virtual network) | Real internet access (the virtual network only exists inside the simulation) |
 
 ---
 
-## 2. 开发板：ESP32 / Arduino Uno / Pico
+## 2. Boards: ESP32 / Arduino Uno / Pico
 
-单片机（MCU）就是一颗"能跑程序的小电脑"，开发板 = MCU + 供电电路 + 排针，方便你接线。
+A microcontroller (MCU) is "a tiny computer that runs a program". A dev board = MCU + power circuitry + pin headers, so you can wire things up.
 
-| 板子 | 特点 | 什么时候选它 | Wokwi `type` |
+| Board | Characteristics | When to choose it | Wokwi `type` |
 |---|---|---|---|
-| **ESP32 DevKit C** | 双核 240MHz、**自带 WiFi+蓝牙**、3.3V、GPIO 多、支持 PWM/ADC/I2C | 要联网、要网页控制、要跑稍复杂逻辑（**默认首选**） | `board-esp32-devkit-c-v4` |
-| Arduino Uno | 5V、ATmega328、IO 少、无网络 | 教学经典、5V 传感器、代码最简单的场景 | `board-uno` |
-| Raspberry Pi Pico | 双核 133MHz、3.3V、无 WiFi（Pico W 有） | 要更精确的定时/PIO、低成本 | `board-rp-pico` |
+| **ESP32 DevKit C** | dual core 240 MHz, **WiFi + Bluetooth built in**, 3.3V, many GPIOs, PWM/ADC/I2C | needs networking, web control, or moderately complex logic (**default first choice**) | `board-esp32-devkit-c-v4` |
+| Arduino Uno | 5V, ATmega328, few IOs, no networking | classic teaching, 5V sensors, the simplest code | `board-uno` |
+| Raspberry Pi Pico | dual core 133 MHz, 3.3V, no WiFi (Pico W has it) | tighter timing/PIO, low cost | `board-rp-pico` |
 
-### 3.3V 与 5V：最容易烧东西的地方
+### 3.3V vs 5V: where things get burned
 
-- **ESP32 的 IO 是 3.3V**：输出高电平 ≈ 3.3V，输入耐压一般也只到 3.3V。
-- **Arduino Uno 是 5V**。
-- 把 5V 信号直接灌进 ESP32 的 IO → 真机会烧，仿真里可能表现为"读数永远不对"。
-- 板子上通常有 `3V3` 和 `5V`(或 `VIN`) 两种电源脚，**看清楚再接**。
+- **ESP32 IOs are 3.3V**: a high output is ≈3.3V and the inputs generally tolerate only 3.3V.
+- **Arduino Uno is 5V.**
+- Feeding a 5V signal straight into an ESP32 IO → burns on real hardware; in simulation it often shows up as "the reading is always wrong".
+- Boards usually expose both `3V3` and `5V` (or `VIN`) rails — **read the label before connecting**.
 
-### GPIO 是什么
+### What GPIO means
 
-GPIO = General Purpose Input/Output，通用输入输出脚，可以由程序控制成：
+GPIO = General Purpose Input/Output, a pin a program can drive as:
 
-- **输出**：`digitalWrite(pin, HIGH)` → 3.3V；`LOW` → 0V
-- **输入**：`digitalRead(pin)` → 读到 1 或 0
-- **模拟输入**：`analogRead(pin)` → 0~4095（ESP32 12 位 ADC）
-- **PWM 输出**：`ledcWrite()` → 占空比控制亮度/转速/角度
-- **复用**：I2C（SDA/SCL）、SPI、UART 都占用特定 GPIO
+- **Output**: `digitalWrite(pin, HIGH)` → 3.3V; `LOW` → 0V
+- **Input**: `digitalRead(pin)` → reads 1 or 0
+- **Analogue input**: `analogRead(pin)` → 0–4095 (ESP32 has a 12-bit ADC)
+- **PWM output**: `ledcWrite()` → duty cycle controls brightness/speed/angle
+- **Alternate functions**: I2C (SDA/SCL), SPI, UART all occupy specific GPIOs
 
-**关键：GPIO 编号 ≠ 物理脚序。** 板子上标的 `D2` 可能是 GPIO2，但 `D15` 可能是 GPIO15——以板子的引脚图为准。Wokwi 里写 `esp:2` 就是 GPIO2。
+**Key point: GPIO numbers ≠ physical pin order.** A pin labelled `D2` may be GPIO2, but `D15` may be GPIO15 — trust the pinout diagram. In Wokwi, `esp:2` means GPIO2.
 
-ESP32 常用脚（记这几个够用）：
+ESP32 pins worth memorising:
 
-| 用途 | GPIO | 说明 |
+| Purpose | GPIO | Notes |
 |---|---|---|
-| 板载 LED | 2 | 最简单的心跳灯 |
-| 通用输出 | 4, 5, 13, 25, 26, 27 | 25/26/27 也常用于 LED |
-| 按键输入 | 4, 15, 16, 17 | 配 `INPUT_PULLUP` |
-| ADC | 34, 35, 36, 39 | **只能输入**，没有上拉 |
-| I2C | 21(SDA), 22(SCL) | OLED/DHT 常用 |
-| 串口 | TX=1, RX=3 | 接 `$serialMonitor` 才能看打印 |
-| **不要用** | 6~11 | 接 Flash，一动就崩 |
+| On-board LED | 2 | simplest heartbeat lamp |
+| General output | 4, 5, 13, 25, 26, 27 | 25/26/27 are also common for LEDs |
+| Button input | 4, 15, 16, 17 | pair with `INPUT_PULLUP` |
+| ADC | 34, 35, 36, 39 | **input only**, no pull-up |
+| I2C | 21 (SDA), 22 (SCL) | common for OLED/DHT |
+| Serial | TX=1, RX=3 | must be wired to `$serialMonitor` to see output |
+| **Avoid** | 6–11 | connected to flash; touching them crashes the chip |
 
 ---
 
-## 3. 电路最小常识
+## 3. Minimum circuit knowledge
 
-### 一个回路 = 电源 → 负载 → 回到地
+### A loop = power → load → back to ground
 
-要让 LED 亮，必须形成闭合回路：
+For an LED to light, the circuit must be closed:
 
 ```
-GPIO2 ──→ 电阻 ──→ LED(A 阳极) ──→ LED(C 阴极) ──→ GND
+GPIO2 ──→ resistor ──→ LED (A anode) ──→ LED (C cathode) ──→ GND
 ```
 
-电流从 GPIO 流出，经电阻限流，穿过 LED，回到 GND。**没有 GND 就永远不亮**——初学者 80% 的"灯不亮"都是忘了接地。
+Current leaves the GPIO, is limited by the resistor, passes through the LED and returns to GND. **Without GND it will never light** — 80% of beginner "the lamp won't light" cases are a missing ground.
 
-### 为什么 LED 必须串电阻
+### Why an LED always needs a series resistor
 
-LED 的内阻很小，直接接 3.3V 会瞬间电流过大 → 真机烧毁，仿真里表现为**灯变灰/不亮**（Wokwi 会提示过流）。
+An LED has very low internal resistance; connecting it straight to 3.3V draws too much current → destroyed on real hardware, and in simulation the lamp goes **grey/dark** (Wokwi reports over-current).
 
-欧姆定律算一下：LED 正向压降约 2V（红色），目标电流 10mA：
+Ohm's law: an LED drops about 2V (red) and we want 10mA:
 
 ```
 R = (3.3V - 2.0V) / 0.01A = 130Ω
 ```
 
-工程上取 **220Ω ~ 330Ω** 都安全（电流更小、灯稍暗）。所以你会看到所有示例都是 `330Ω`。
+In practice **220Ω–330Ω** is safe (lower current, slightly dimmer). That is why every example uses `330Ω`.
 
-### 三种基本元件
+### Three basic parts
 
-| 元件 | 作用 | Wokwi type | 引脚 |
+| Part | Role | Wokwi type | Pins |
 |---|---|---|---|
-| LED | 发光（数字量/PWM） | `wokwi-led` | `A` 阳极、`C` 阴极 |
-| 电阻 | 限流/分压/上拉 | `wokwi-resistor` | `1`、`2`（不分方向） |
-| 按键 | 输入 | `wokwi-pushbutton` | `1.l/2.l` 同侧，`1.r/2.r` 另一侧，按下才跨侧通 |
+| LED | light (digital/PWM) | `wokwi-led` | `A` anode, `C` cathode |
+| Resistor | current limiting / dividing / pull-up | `wokwi-resistor` | `1`, `2` (no polarity) |
+| Button | input | `wokwi-pushbutton` | `1.l/2.l` one side, `1.r/2.r` the other; only a press bridges sides |
 
-按键接法（防悬空）：一端接 GPIO4，另一端接 GND，代码里 `pinMode(4, INPUT_PULLUP)`。这样**没按 = HIGH，按下 = LOW**（反过来了，别搞混）。
+Button wiring (avoids a floating pin): one side to GPIO4, the other to GND, and `pinMode(4, INPUT_PULLUP)` in code. Then **not pressed = HIGH, pressed = LOW** — inverted, so don't mix it up.
 
 ---
 
-## 4. 串口：你唯一的"眼睛"
+## 4. Serial: your only pair of eyes
 
-板子没法直接跟你说话，只能通过串口打印：
+The board cannot talk to you directly, only through serial prints:
 
 ```cpp
 void setup() {
-  Serial.begin(115200);          // 波特率，Wokwi 监视器默认也是 115200
+  Serial.begin(115200);          // baud rate; the Wokwi monitor defaults to 115200 too
   Serial.println("boot ok");
 }
 void loop() {
@@ -123,65 +123,65 @@ void loop() {
 }
 ```
 
-在 Wokwi 里要看到打印，`diagram.json` 必须有这两根线：
+To see the output in Wokwi, `diagram.json` must contain these two connections:
 
 ```json
 [ "esp:TX", "$serialMonitor:RX", "", [] ],
 [ "esp:RX", "$serialMonitor:TX", "", [] ]
 ```
 
-> 忘了这两根线 → 代码跑得好好的，但监视器一片空白。这是新手最常见的"程序没跑？"误判。
+> Forget these two lines and the code runs perfectly while the monitor stays blank. This is the most common beginner misdiagnosis of "the program didn't run?".
 
-**无头仿真（本 skill 的默认模式）下，串口日志就是验收标准**：有没有 `[BOOT]`、有没有 `IP:`、`duty=` 是不是在变。所以 AI 生成的固件必须在关键节点打印，这不是啰嗦，是设计。
+**In headless simulation (this skill's default mode) the serial log is the acceptance criterion**: is `[BOOT]` there, is `IP:` there, is `duty=` changing. That is why AI-generated firmware prints at key points — it is design, not noise.
 
 ---
 
-## 5. 常用外设速览
+## 5. Common peripherals at a glance
 
-| 外设 | 怎么通信 | 注意 |
+| Peripheral | How it communicates | Watch out |
 |---|---|---|
-| 电位器 `wokwi-potentiometer` | 模拟电压 → ADC | 三脚：`1`=GND、`2`=信号、`3`=VCC |
-| 光敏电阻 `wokwi-photoresistor-sensor` | 模拟/数字 | 可替代"没模型"的传感器 |
-| 蜂鸣器 `wokwi-buzzer` | 数字/PWM 频率 | `+`/`-` |
-| 舵机 `wokwi-servo` | PWM 50Hz，脉宽 500~2500us | 角度 0~180，需外部 5V 供电更稳 |
-| OLED `wokwi-ssd1306` | I2C | 地址 `0x3C`；Wokwi 不自动加上拉，必要时 2.2kΩ 到 3V3 |
-| DHT22 `wokwi-dht22` | 单总线 | 需要 `DHT sensor library` |
-| 超声波 `wokwi-hc-sr04` | Trig/Echo | Echo 是 5V，接 3.3V 板要分压（仿真宽容，真机不行） |
+| Potentiometer `wokwi-potentiometer` | analogue voltage → ADC | three legs: `1`=GND, `2`=signal, `3`=VCC |
+| Photoresistor `wokwi-photoresistor-sensor` | analogue/digital | good stand-in for a sensor with no model |
+| Buzzer `wokwi-buzzer` | digital / PWM frequency | `+`/`-` |
+| Servo `wokwi-servo` | PWM 50Hz, 500–2500µs pulse | 0–180°, external 5V is steadier |
+| OLED `wokwi-ssd1306` | I2C | address `0x3C`; Wokwi adds no pull-ups — 2.2kΩ to 3V3 if needed |
+| DHT22 `wokwi-dht22` | one-wire | needs the `DHT sensor library` |
+| Ultrasonic `wokwi-hc-sr04` | Trig/Echo | Echo is 5V; use a divider on a 3.3V board (simulation is forgiving, real hardware is not) |
 
 ---
 
-## 6. 你需要记住的词汇对照
+## 6. Vocabulary you should remember
 
-| 英文 | 中文 | 一句话 |
-|---|---|---|
-| GPIO | 通用输入输出脚 | 能被程序控制的针脚 |
-| PWM | 脉宽调制 | 快速开关模拟"中间亮度" |
-| duty cycle | 占空比 | 一个周期里高电平占的比例（0~255 或 0~100%） |
-| ADC | 模数转换 | 把电压变成数字 0~4095 |
-| I2C | 一种两线总线 | SDA+SCL，可挂多个设备，靠地址区分 |
-| pull-up | 上拉 | 把悬空的输入脚拉到高电平 |
-| GND | 地 | 所有电路的公共参考点，必须共地 |
-| firmware | 固件 | 烧进板子的程序 |
-| FQBN | 板卡全名 | `esp32:esp32:esp32` 这种 |
-| headless | 无头 | 没有图形界面，只能看日志 |
+| Term | Meaning in one line |
+|---|---|
+| GPIO | a pin a program can control |
+| PWM | pulse-width modulation — fast switching that emulates intermediate brightness |
+| duty cycle | fraction of a period spent high (0–255 or 0–100%) |
+| ADC | analogue-to-digital conversion; turns a voltage into 0–4095 |
+| I2C | a two-wire bus (SDA+SCL); several devices distinguished by address |
+| pull-up | resistor that holds a floating input at high level |
+| GND | ground — the common reference every circuit must share |
+| firmware | the program flashed into the board |
+| FQBN | fully qualified board name, e.g. `esp32:esp32:esp32` |
+| headless | no GUI; you only have logs |
 
 ---
 
-## 7. 自检：你真的懂了吗
+## 7. Self-check: did you really get it
 
-能回答下面四个问题，就可以开始动手了：
+If you can answer these four questions, you are ready to start:
 
-1. 为什么 LED 要串 330Ω 电阻，不串会怎样？
-2. `esp:2` 指的是什么？和板子上印的 `D2` 是一回事吗？
-3. Wokwi 里代码写了 `Serial.println`，但监视器没输出，先检查什么？
-4. ESP32 的 IO 能不能直接接 5V 传感器输出？
+1. Why does an LED need a 330Ω resistor, and what happens without one?
+2. What does `esp:2` refer to? Is it the same as the `D2` printed on the board?
+3. You wrote `Serial.println` in Wokwi but the monitor shows nothing. What do you check first?
+4. Can an ESP32 IO be connected directly to a 5V sensor output?
 
 <details>
-<summary>答案</summary>
+<summary>Answers</summary>
 
-1. 限流。不串则电流过大，真机烧 LED，仿真里灯变灰不亮。
-2. GPIO2。通常和 `D2` 对应，但**以板子引脚图为准**，编号≠物理位置。
-3. 先看 `diagram.json` 有没有把 `esp:TX/RX` 接到 `$serialMonitor`。
-4. 不能。ESP32 IO 是 3.3V，5V 会损坏；需要电平转换或分压。
+1. Current limiting. Without it the current is too high: real hardware destroys the LED, simulation shows a grey, unlit lamp.
+2. GPIO2. It usually corresponds to `D2`, but **trust the pinout diagram** — the number is not the physical position.
+3. First check whether `diagram.json` connects `esp:TX/RX` to `$serialMonitor`.
+4. No. ESP32 IOs are 3.3V and 5V will damage them; use a level shifter or a divider.
 
 </details>

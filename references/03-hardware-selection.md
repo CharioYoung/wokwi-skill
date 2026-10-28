@@ -1,134 +1,134 @@
-# 03 · 选型：从需求到元件清单
+# 03 · Part selection: from requirement to bill of materials
 
-**中文** | [English](03-hardware-selection.en.md)
+[中文](03-hardware-selection.zh.md) | **English**
 
-选型的产物必须是**三列表格**，最终写进查看器的 `CFG.selection`：
+The output of selection must be a **three-column table**, which finally lands in the viewer's `CFG.selection`:
 
-| 需求点 | 选型 | 理由 / 约束 |
+| Requirement | Choice | Reason / constraint |
 |---|---|---|
-| 要联网网页控制 | ESP32 DevKit C | 自带 WiFi，能跑 HTTP server；Wokwi part = `board-esp32-devkit-c-v4` |
-| 指示灯 | wokwi-led（红） | GPIO2 支持 LEDC 硬件 PWM，可做呼吸；单色模型足够 |
-| 限流 | 330Ω | LED 直连 3.3V 会过流；`wokwi-resistor value=330` |
+| Web control over the network | ESP32 DevKit C | WiFi built in, can run an HTTP server; Wokwi part = `board-esp32-devkit-c-v4` |
+| Indicator lamp | wokwi-led (red) | GPIO2 supports LEDC hardware PWM for breathing; a single-colour model is enough |
+| Current limiting | 330Ω | an LED straight onto 3.3V over-currents; `wokwi-resistor value=330` |
 
-**"为什么不是别的"比"选了什么"更重要**——用户看得懂理由，才知道后面改什么。
-
----
-
-## 1. 决策树：先定板子
-
-```
-需求里有"联网 / 网页 / 手机控制 / 云 / MQTT / HTTP" 吗？
-├─ 有 ────────────────────────────→ ESP32 DevKit C   (board-esp32-devkit-c-v4)
-└─ 无
-   ├─ 只是灯/按键/蜂鸣器/电位器这类基础实验？
-   │   ├─ 教学演示、资料多、5V 传感器 ─→ Arduino Uno   (board-uno)
-   │   └─ 想统一生态、3.3V、引脚多 ────→ ESP32（仍是默认）
-   ├─ 需要精确时序 / 多路 PWM / 低功耗 → Raspberry Pi Pico (board-rp-pico)
-   └─ 需要小体积 / 特定封装 ───────────→ ESP32-S3 (board-esp32-s3-devkitc-1)
-```
-
-**默认答案：ESP32 DevKit C。** 它 GPIO 够多、3.3V、支持 PWM/ADC/I2C/SPI，还是 Wokwi 支持最好的一块板。除非有明确理由，不要换。
+**"Why not something else" matters more than "what was chosen"** — the user can only know what to change later if they understand the reason.
 
 ---
 
-## 2. 需求关键词 → 元件映射
+## 1. Decision tree: board first
 
-| 需求里出现这些词 | 选它 | Wokwi type | 备注 |
+```
+Does the requirement mention networking / web / phone control / cloud / MQTT / HTTP?
+├─ yes ─────────────────────────────→ ESP32 DevKit C   (board-esp32-devkit-c-v4)
+└─ no
+   ├─ just basic experiments with LEDs/buttons/buzzers/potentiometers?
+   │   ├─ teaching demo, lots of material, 5V sensors ─→ Arduino Uno   (board-uno)
+   │   └─ want one ecosystem, 3.3V, more pins ──────────→ ESP32 (still the default)
+   ├─ needs tight timing / many PWM channels / low power → Raspberry Pi Pico (board-rp-pico)
+   └─ needs a small footprint / specific package ────────→ ESP32-S3 (board-esp32-s3-devkitc-1)
+```
+
+**Default answer: ESP32 DevKit C.** Enough GPIOs, 3.3V, PWM/ADC/I2C/SPI, and the best-supported board in Wokwi. Do not switch unless there is a clear reason.
+
+---
+
+## 2. Requirement keywords → part mapping
+
+| Words in the requirement | Pick this | Wokwi type | Notes |
 |---|---|---|---|
-| 灯 / 指示 / 亮灭 / 呼吸 / 调光 | LED | `wokwi-led` | 必串 220–330Ω；`attrs:{color}` |
-| 按钮 / 按下 / 开关（物理） | 轻触按键 | `wokwi-pushbutton` | 配 `INPUT_PULLUP` |
-| 旋钮 / 调节 / 模拟量 | 电位器 | `wokwi-potentiometer` | 接 ADC 脚（34/35/36/39 或 32/33） |
-| 亮度 / 光敏 / 天黑 | 光敏电阻模块 | `wokwi-photoresistor-sensor` | 输出模拟电压 |
-| 温度 / 湿度 | DHT22 | `wokwi-dht22` | 需 `DHT sensor library` |
-| 距离 / 避障 | 超声波 | `wokwi-hc-sr04` | Trig/Echo 两线 |
-| 显示文字 / 数值 / 图表 | OLED 128×64 | `wokwi-ssd1306` | I2C，地址 `0x3C`，需库 |
-| 声音 / 提示音 | 蜂鸣器 | `wokwi-buzzer` | 有源/无源行为不同 |
-| 转动 / 云台 / 舵机 | 舵机 | `wokwi-servo` | PWM 50Hz；0–180° |
-| 电机 / 正反转 | 直流电机 | `wokwi-dc-motor` | 常配 L298N |
-| 继电器 / 强电 | 继电器模块 | `wokwi-relay-module` | 仿真里只体现通断 |
-| 红外遥控 / 空调 | IR 接收/发射 | `wokwi-ir-receiver` / `wokwi-ir-remote` | 学习码值打印到串口验证 |
-| 按键矩阵 / 键盘 | 矩阵键盘 | `wokwi-membrane-keypad` | 4×4 |
-| 存储 / 记录 | microSD | `wokwi-microsd-card` | SPI |
-| 看串口打印 | 虚拟监视器 | `$serialMonitor` | 必须接 `esp:TX/RX` |
+| light / indicate / on-off / breathing / dimming | LED | `wokwi-led` | always with 220–330Ω; `attrs:{color}` |
+| button / press / switch (physical) | tactile button | `wokwi-pushbutton` | pair with `INPUT_PULLUP` |
+| knob / adjust / analogue | potentiometer | `wokwi-potentiometer` | wire to an ADC pin (34/35/36/39 or 32/33) |
+| brightness / light sensor / night | photoresistor module | `wokwi-photoresistor-sensor` | outputs an analogue voltage |
+| temperature / humidity | DHT22 | `wokwi-dht22` | needs the `DHT sensor library` |
+| distance / obstacle avoidance | ultrasonic | `wokwi-hc-sr04` | Trig/Echo, two wires |
+| display text / values / charts | OLED 128×64 | `wokwi-ssd1306` | I2C, address `0x3C`, needs a library |
+| sound / beep | buzzer | `wokwi-buzzer` | active vs passive behave differently |
+| rotate / pan mount / servo | servo | `wokwi-servo` | PWM 50Hz; 0–180° |
+| motor / forward-reverse | DC motor | `wokwi-dc-motor` | usually with an L298N |
+| relay / mains power | relay module | `wokwi-relay-module` | simulation only shows open/closed |
+| IR remote / air conditioner | IR receiver/emitter | `wokwi-ir-receiver` / `wokwi-ir-remote` | learn the code and print it to serial to verify |
+| key matrix / keypad | membrane keypad | `wokwi-membrane-keypad` | 4×4 |
+| storage / logging | microSD | `wokwi-microsd-card` | SPI |
+| see serial output | virtual monitor | `$serialMonitor` | must be wired to `esp:TX/RX` |
 
-> 完整可搜索的元件名以 Wokwi 官网文档 <https://docs.wokwi.com/parts> 为准。**写 `diagram.json` 前先确认 type 存在**——拼错一个字母就是"元件不显示"。
+> The authoritative, searchable part list is the official documentation at <https://docs.wokwi.com/parts>. **Confirm the type exists before writing `diagram.json`** — one wrong letter means "the part does not appear".
 
 ---
 
-## 3. 引脚分配约定（避免抢脚）
+## 3. Pin assignment conventions (avoid fighting over pins)
 
-ESP32 上按这个顺序分配，基本不会冲突：
+Allocate in this order on an ESP32 and you will rarely hit a conflict:
 
-| 用途 | 推荐脚 | 原因 |
+| Purpose | Recommended pins | Why |
 |---|---|---|
-| 板载/主 LED | 2 | 板上有丝印，最直观 |
-| 其余 LED / 执行器 | 4, 5, 13, 25, 26, 27 | 通用、无特殊功能 |
-| 按键 | 15, 16, 17, 18 | 支持内部上拉 |
-| ADC 输入 | 34, 35, 36, 39 | **只能输入，无上拉**；32/33 也带 ADC 但可输出 |
-| I2C | 21(SDA), 22(SCL) | 默认 Wire 引脚 |
-| SPI | 18(SCK), 19(MISO), 23(MOSI), 5(CS) | 与部分 LED 脚冲突，注意 |
-| 串口 | 1(TX), 3(RX) | 已被监视器占用，不要接外设 |
-| **禁用** | 6–11 | 接 SPI Flash，一用就崩 |
+| On-board / main LED | 2 | labelled on the silkscreen, the most obvious choice |
+| Other LEDs / actuators | 4, 5, 13, 25, 26, 27 | general purpose, no special function |
+| Buttons | 15, 16, 17, 18 | support internal pull-up |
+| ADC inputs | 34, 35, 36, 39 | **input only, no pull-up**; 32/33 also have ADC but can output |
+| I2C | 21 (SDA), 22 (SCL) | default `Wire` pins |
+| SPI | 18 (SCK), 19 (MISO), 23 (MOSI), 5 (CS) | conflicts with some LED pins — check |
+| Serial | 1 (TX), 3 (RX) | already used by the monitor; do not attach peripherals |
+| **Forbidden** | 6–11 | wired to SPI flash; using them crashes the chip |
 
 ---
 
-## 4. 当 Wokwi 没有对应模型（必须如实告知）
+## 4. When Wokwi has no model for a part (must be stated honestly)
 
-**绝不假装跑通。** 按优先级选择降级方案，并在交付说明里写清"这是模拟，不是真器件"。
+**Never pretend it ran.** Choose a fallback by priority and state clearly in the delivery notes "this is a simulation, not the real part".
 
-### ① 等效替代（首选）
+### ① Equivalent substitute (preferred)
 
-用输出特性相同的通用器件顶替：
+Replace it with a generic part that has the same output behaviour:
 
-| 真实器件 | 替代 | 说明 |
+| Real part | Substitute | Explanation |
 |---|---|---|
-| 语音识别模块 | 串口输入 / 网页按钮 | "说开灯" → 串口发 `on`，MCU 逻辑不变 |
-| 特定型号温湿度芯片 | `wokwi-dht22` | 单总线协议同类 |
-| 触摸按键 | `wokwi-pushbutton` | 都是数字输入 |
-| 人体红外 PIR | 按键 / 电位器 | 输出 0/1 或模拟量 |
-| 电流传感器 | 电位器 | 模拟电压输入 |
-| 特定型号 ADC 芯片 | ESP32 内置 ADC | 12 位足够演示 |
+| Voice recognition module | serial input / web button | "turn on the light" → send `on` over serial; MCU logic unchanged |
+| A specific temperature/humidity chip | `wokwi-dht22` | same one-wire protocol family |
+| Touch button | `wokwi-pushbutton` | both are digital inputs |
+| PIR motion sensor | button / potentiometer | output 0/1 or an analogue level |
+| Current sensor | potentiometer | analogue voltage input |
+| A specific ADC chip | the ESP32's built-in ADC | 12 bits is plenty for a demo |
 
-### ② 信号注入
+### ② Signal injection
 
-用 Wokwi 的可交互元件"喂"数据：
+Feed data through Wokwi's interactive parts:
 
-- 电位器 → 模拟任意传感器电压；
-- 串口监视器 → 手工敲命令（`on`/`off`/`25.5`）；
-- 按键 → 触发事件。
+- potentiometer → simulate any sensor voltage;
+- serial monitor → type commands by hand (`on`/`off`/`25.5`);
+- button → trigger events.
 
-### ③ 只仿真可仿真部分
+### ③ Simulate only what can be simulated
 
-把不支持的模块画进 `diagram.json`（占位、不接线）或干脆不画，明确写：
+Draw the unsupported module into `diagram.json` (as a placeholder, unwired) or leave it out entirely, and state explicitly:
 
-> 「XX 模块 Wokwi 无模型，本仿真验证 MCU 侧逻辑与其余外设；真机接线见下表。」
+> "Module XX has no model in Wokwi. This simulation verifies the MCU-side logic and the remaining peripherals; real-hardware wiring is in the table below."
 
-并给出真机接线表（引脚、电压、协议）。
+Then provide the real wiring table (pins, voltages, protocol).
 
-### ④ 换等价方案
+### ④ Switch to an equivalent design
 
-如果核心功能依赖专有模块（如某品牌语音芯片），改成通用方案：
+If the core feature depends on a proprietary module (say a particular voice chip), switch to a generic approach:
 
-- 语音控制 → 网页/串口指令触发；
-- 专用无线模块 → ESP32 自带 WiFi/蓝牙。
+- voice control → trigger from a web page or a serial command;
+- a dedicated wireless module → the ESP32's built-in WiFi/Bluetooth.
 
-### ⑤ 明确告知
+### ⑤ State the boundary explicitly
 
-交付时用一句话说清边界，例如：
+At delivery, describe the limit in one sentence, for example:
 
-> 语音识别在 Wokwi 里没有模型，我用"串口输入 on/off"代替了语音输入环节；识别模块 → ESP32 的接线和代码我写在下面，真机上把串口换成模块的 UART 输出即可。
+> Voice recognition has no model in Wokwi, so I replaced the voice input stage with serial `on`/`off` commands. The module → ESP32 wiring and code are below; on real hardware, swap the serial input for the module's UART output.
 
 ---
 
-## 5. 选型自检清单
+## 5. Selection checklist
 
-写完选型表，逐条过一遍：
+After writing the selection table, walk through this list:
 
-- [ ] 每个 `type` 都是 Wokwi 真实存在的（不是想当然拼的）
-- [ ] 每颗 LED 都有串联电阻
-- [ ] 输入脚都配置了上拉/下拉，没有悬空
-- [ ] 没有用到 GPIO 6–11
-- [ ] 需要库的元件（OLED/DHT/舵机）已在 `libraries.txt` 列出
-- [ ] 需要联网的需求，板子确实带 WiFi
-- [ ] 拿不到模型的器件，已经写明降级方案与真机接法
-- [ ] 每条选型都有"为什么不是别的"的理由
+- [ ] every `type` really exists in Wokwi (not invented by guessing)
+- [ ] every LED has a series resistor
+- [ ] every input pin has a pull-up/pull-down, nothing floating
+- [ ] GPIO 6–11 are unused
+- [ ] parts that need a library (OLED/DHT/servo) are listed in `libraries.txt`
+- [ ] for network requirements, the board really has WiFi
+- [ ] for parts without a model, the fallback and real wiring are documented
+- [ ] every row carries a "why not something else" reason

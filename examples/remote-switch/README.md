@@ -1,23 +1,23 @@
-# 示例 02 · WiFi 网页远程开关 + PWM 呼吸灯
+# Example 2 · WiFi web remote switch + PWM breathing LED
 
-**中文** | [English](README.en.md)
+[中文](README.zh.md) | **English**
 
-**覆盖能力**：WiFi 连接、HTTP 服务器、LEDC 硬件 PWM、串口命令、复杂可观测性。零第三方库（`WiFi.h`/`WebServer.h` 是 ESP32 核心自带）。
+**Capabilities covered**: WiFi connection, an HTTP server, LEDC hardware PWM, serial commands, and richer observability. Zero third-party libraries (`WiFi.h` / `WebServer.h` ship with the ESP32 core).
 
-## 需求
+## Request
 
-> wokwi: 用 ESP32 做一个能通过网页远程控制的开关，顺便有个呼吸灯效果
+> wokwi: an ESP32 switch that can be controlled remotely from a web page, with a breathing LED effect
 
-## 文件
+## Files
 
-| 文件 | 说明 |
+| File | What it is |
 |---|---|
-| `remote-switch.ino` | 固件：PWM 呼吸 + HTTP `/on` `/off` `/breathe` `/status` + 串口命令 |
-| `diagram.json` | 电路：ESP32 + 1×LED（GPIO2）+ 330Ω |
-| `wokwi.toml` | 指向 `build/remote-switch.ino.bin` |
-| `sim-viewer.html` | 结果查看器：PWM 呼吸动画 + 日志回放 + 可点按钮（等价于 HTTP 端点） |
+| `remote-switch.ino` | firmware: PWM breathing + HTTP `/on` `/off` `/breathe` `/status` + serial commands |
+| `diagram.json` | circuit: ESP32 + 1×LED (GPIO2) + 330Ω |
+| `wokwi.toml` | points at `build/remote-switch.ino.bin` |
+| `sim-viewer.html` | result viewer: PWM breathing animation + log replay + clickable buttons (equivalent to the HTTP endpoints) |
 
-## 怎么跑
+## How to run it
 
 ```bash
 cd examples/remote-switch
@@ -25,17 +25,17 @@ cd examples/remote-switch
 powershell -File ../../scripts/compile.ps1 -Project .
 #    macOS/Linux: bash ../../scripts/compile.sh .
 
-# 注意：这个项目要等 WiFi 连上，timeout 至少 16000（约 80 秒实际等待）
+# note: this project waits for WiFi, so timeout must be at least 16000 (about 80 s of real waiting)
 powershell -File ../../scripts/simulate.ps1 -Project . -Timeout 16000 -Expect "IP:","server started"
 
 cat sim-*/serial.log
 ```
 
-## 预期输出
+## Expected output
 
-编译：`Sketch uses 947,568 bytes (72%)`，产物 `build/remote-switch.ino.bin`。
+Build: `Sketch uses 947,568 bytes (72%)`, artefact `build/remote-switch.ino.bin`.
 
-串口：
+Serial:
 
 ```
 [BOOT] self-test: PWM fade on GPIO2 (2 cycles)
@@ -53,23 +53,23 @@ IP: 10.13.37.2
 [STATUS] tick | mode=BREATHE | led=ON | duty=93
 ```
 
-`duty` 在 0~255 之间跳动 = **PWM 真的在变**，这是呼吸灯在工作的硬证据。
+`duty` moving across 0–255 means **the PWM is really changing** — hard evidence the breathing effect works.
 
-## 三个坑（都踩过）
+## Three traps (all hit for real)
 
-1. **`--timeout` 太小会看不到 WiFi**：给 16000 以上，否则日志停在 `[SHOW] holding LED ON 3s`。
-2. **`10.13.37.2` 只存在于虚拟网内**：你本机浏览器打不开它，只有 Wokwi 仿真内的浏览器能访问。
-3. **`--interactive` 需要真 TTY**：用管道喂 `on` 命令不生效。要验证 HTTP 逻辑，看日志里的 `[HTTP]` 行即可。
+1. **Too small a `--timeout` and you never see WiFi**: give 16000 or more, otherwise the log stops at `[SHOW] holding LED ON 3s`.
+2. **`10.13.37.2` only exists inside the virtual network**: your host browser cannot open it; only the browser inside the Wokwi simulation can.
+3. **`--interactive` needs a real TTY**: piping `on` into it does nothing. To verify the HTTP logic, just read the `[HTTP]` lines in the log.
 
-## 学到什么
+## What you learn here
 
-- **ESP32 core 3.x 的 PWM API 是 `ledcAttach(pin, freq, res)`**；2.x 是 `ledcSetup` + `ledcAttachPin`，版本不匹配会编译失败。
-- **网络类项目必须有超时重试**，不要 `while(WiFi.status()!=WL_CONNECTED);` 死等。
-- **常亮 3 秒的"展示窗口"**：让"灯亮着"这件事有一个确定的观测窗口，人眼和截图都能抓住。
-- **HTTP 端点 + 串口命令双通道**：无头环境用串口验证逻辑，有界面时用网页交互。
+- **The ESP32 core 3.x PWM API is `ledcAttach(pin, freq, res)`**; 2.x used `ledcSetup` + `ledcAttachPin`, and a version mismatch fails the build.
+- **Network projects must have timeout and retry** — never spin in `while(WiFi.status()!=WL_CONNECTED);`.
+- **The 3-second steady-on "showcase window"** gives "the lamp is on" a deterministic observation window that both eyes and screenshots can catch.
+- **Two channels: HTTP endpoints plus serial commands** — serial verifies the logic headlessly, the web page provides interaction when a UI is available.
 
-## 想改造它
+## Ideas to modify it
 
-- 加一个按钮（`wokwi-pushbutton`，GPIO4）物理切换，与网页控制共存。
-- 把 `/status` 返回 JSON，网页轮询显示实时 duty。
-- 加 MQTT（需 `PubSubClient` 库，并在 `libraries.txt` 里声明）——注意 Wokwi 虚拟网是否能连到公共 broker，多数组件只能访问仿真内地址。
+- Add a button (`wokwi-pushbutton`, GPIO4) for physical toggling alongside the web control.
+- Make `/status` return JSON and have the page poll it for the live duty value.
+- Add MQTT (needs the `PubSubClient` library, declared in `libraries.txt`) — note that the Wokwi virtual network may not reach a public broker; most components can only talk to addresses inside the simulation.

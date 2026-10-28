@@ -1,60 +1,60 @@
-# 示例 04 · 小鸭机器人（多执行器协同）
+# Example 04 · Duck Robot (many actuators, one sketch)
 
-**中文** | [English](README.en.md)
+[中文](README.zh.md) | **English**
 
-**覆盖能力**：4 类执行器/传感器协同（LED、无源蜂鸣器、舵机、超声波）、ESP32 原生 LEDC 输出舵机 PWM（**零第三方库**）、事件驱动状态机、scenario 注入验证分支、真实电路渲染。
+**What it exercises**: four kinds of actuator/sensor in one sketch (LED, passive buzzer, servo, ultrasonic), servo PWM straight from the ESP32 LEDC peripheral (**no third-party library**), an event-driven state machine, a scenario file that proves the branch was taken, and a real circuit rendering.
 
-## 需求
+## The ask
 
-> wokwi: 用 ESP32 做一个小鸭机器人，两只眼睛会亮，两条腿来回摆像走路，遇到障碍物就叫一声躲开
+> wokwi: an ESP32 duck robot — eyes light up, legs swing like it is walking, and it quacks and dodges when something gets in the way
 
-## 电路
+## Circuit
 
-9 个元件、18 条真实连线（另 2 条串口虚拟线）：
+9 parts, 18 real wires (plus 2 virtual serial lines):
 
-| 元件 | 型号 | 引脚 | 作用 |
+| Part | Type | Pins | Role |
 |---|---|---|---|
-| 主板 | `board-esp32-devkit-c-v4` | — | 3.3V 逻辑，38 脚 |
-| `eyeL` / `eyeR` | `wokwi-led`（yellow） | A←`rL`/`rR`，C→GND | 两只眼睛，GPIO2 / GPIO4 |
-| `rL` / `rR` | `wokwi-resistor` 330Ω | 串在板与 LED 之间 | 限流，缺了仿真里灯会变灰 |
-| `legL` / `legR` | `wokwi-servo` | PWM←GPIO14/27，V+→5V，GND | 两条腿，相位差 180° 摆动 = 走路感 |
-| `buzz` | `wokwi-buzzer`（无源） | `1`←GPIO13，`2`→GND | 用 `tone()` 双频短音模拟「嘎」 |
-| `hc` | `wokwi-hc-sr04` | TRIG←GPIO5，ECHO→GPIO18，VCC/GND | 前方障碍，<25cm 触发避障 |
+| board | `board-esp32-devkit-c-v4` | — | 3.3V logic, 38 pins |
+| `eyeL` / `eyeR` | `wokwi-led` (yellow) | A←`rL`/`rR`, C→GND | eyes, GPIO2 / GPIO4 |
+| `rL` / `rR` | `wokwi-resistor` 330Ω | between board and LED | current limit; without it the LEDs go grey in simulation |
+| `legL` / `legR` | `wokwi-servo` | PWM←GPIO14/27, V+→5V, GND | legs, 180° out of phase = walking |
+| `buzz` | `wokwi-buzzer` (passive) | `1`←GPIO13, `2`→GND | `tone()` with two pitches = "quack" |
+| `hc` | `wokwi-hc-sr04` | TRIG←GPIO5, ECHO→GPIO18, VCC/GND | obstacle ahead, <25cm triggers avoid |
 
-## 文件
+## Files
 
-| 文件 | 说明 |
+| File | What it is |
 |---|---|
-| `duck-robot.ino` | 固件：WALK ⇄ AVOID 状态机，零 `#include`（舵机走 LEDC，不用 ESP32Servo） |
-| `diagram.json` | 电路：9 元件 / 18 连线，引脚名全部按 `@wokwi/elements` 的真实 `pinInfo` |
-| `wokwi.toml` | 指向 `build/duck-robot.ino.bin` |
-| `scenario.yaml` | 场景：把 HC-SR04 距离在 120cm → 15cm → 120cm 之间改，逼出真实避障分支 |
-| `sim-viewer.html` | 结果查看器：电路由 `PcbView.render(diagram.json)` 渲染，眼亮/摆腿/叫/避障可交互，串口区回放真实日志 |
+| `duck-robot.ino` | Firmware: WALK ⇄ AVOID state machine, zero `#include` (servo via LEDC, no ESP32Servo) |
+| `diagram.json` | Circuit: 9 parts / 18 wires, every pin name taken from the real `pinInfo` in `@wokwi/elements` |
+| `wokwi.toml` | Points at `build/duck-robot.ino.bin` |
+| `scenario.yaml` | Drives the HC-SR04 distance 120cm → 15cm → 120cm so the avoid branch actually runs |
+| `sim-viewer.html` | Viewer: the circuit is `PcbView.render(diagram.json)` output, eyes/legs/quack/avoid are interactive, serial pane replays the real log |
 
-## 怎么跑
+## Running it
 
 ```bash
 cd examples/duck-robot
 
-# 1. 编译
-powershell -File ../../scripts/compile.ps1 -Project .
-#    macOS/Linux: bash ../../scripts/compile.sh .
+# 1. compile
+bash ../../scripts/compile.sh .
+#    Windows: powershell -File ../../scripts/compile.ps1 -Project .
 
-# 2. 仿真（带 scenario，否则距离恒为初值，避障分支永远不会被走到）
+# 2. simulate (with the scenario - without it the distance never changes,
+#    so the avoid branch is unreachable and the run proves nothing)
 WOKWI_SCENARIO=scenario.yaml bash ../../scripts/simulate.sh . 16000 "AVOID" "resume"
 #    Windows:
 #    powershell -File ../../scripts/simulate.ps1 -Project . -Scenario .\scenario.yaml -Expect "AVOID","resume"
 
-# 3. 看日志与页面
+# 3. read the log, open the page
 cat sim-*/serial.log
-#    浏览器打开 sim-viewer.html
 ```
 
-## 预期输出
+## Expected output
 
-编译：`Sketch uses 302,171 bytes (23%)`、`Global variables use 22,312 bytes (6%)`。
+Build: `Sketch uses 302,171 bytes (23%)`, `Global variables use 22,312 bytes (6%)`.
 
-串口（真实仿真，`scenario.yaml` 生效）：
+Serial (real simulation, with `scenario.yaml`):
 
 ```
 =========================================
@@ -70,41 +70,38 @@ cat sim-*/serial.log
 [QUACK] *嘎*
 ```
 
-`AVOID` 那行是关键证据：它只可能在 `scenario.yaml` 把距离压到 15cm 后才出现。**没有 scenario 的"跑通了"什么也证明不了。**
+The `AVOID` line is the evidence: it can only appear after the scenario pulls the distance down to 15cm. A green run **without** a scenario proves nothing.
 
-## 这个示例为什么值得读：三处「看起来对、其实全错」
+## Why this example is worth reading: three things that looked right and were all wrong
 
-它原本是这批示例里最像"能跑"的一个，实际上三个层面同时是错的。
+This was the most "working" looking of the examples and it was wrong on three levels at once.
 
-**1. 页面画的是一只鸭子，不是电路。** 查看器里手写了一个 `<svg>`，黄色椭圆身体加两条腿。它很好看，也很直观，但它不是 `diagram.json` 的渲染结果——图上少一条线、多一个不存在的元件，观众无法察觉。这个示例之后，`verify_viewer.js` 增加了 check 1b：页面里找不到 `PcbView.render(` 直接 FAIL。
+**1. The viewer drew a duck, not a circuit.** It had a hand-written `<svg>`: a yellow ellipse body with two legs. Attractive, intuitive, and not a rendering of `diagram.json` — a missing wire or an invented part would be invisible to anyone looking at it. After this case, `verify_viewer.js` grew check 1b: no `PcbView.render(` in the page means FAIL.
 
-**2. `diagram.json` 里有 7 个编出来的引脚名。**
+**2. Seven pin names in `diagram.json` were invented.**
 
-| 写的 | 实际 |
+| Written | Real |
 |---|---|
 | `buzz:+` / `buzz:-` | `buzz:1` / `buzz:2` |
-| `legL:SIG` / `legL:VCC` | `legL:PWM` / `legL:V+`（两个舵机共 4 处） |
-| `esp:GND.4/5/6` | ESP32 只有 `GND.1`~`GND.3`（`GND.4` 是 Mega 的） |
+| `legL:SIG` / `legL:VCC` | `legL:PWM` / `legL:V+` (4 places, two servos) |
+| `esp:GND.4/5/6` | ESP32 only has `GND.1`~`GND.3` (`GND.4` belongs to the Mega) |
 
-后果不是报错，而是**静默丢线**：渲染器查不到引脚就把那条线跳过，9 条线凭空消失。而固件根本不检查硬件，`digitalWrite` 打在没接灯的脚上照样返回，串口日志依旧漂亮。**串口跑通 ≠ 接线正确。**
+The failure mode is not an error, it is **silent dropping**: the renderer cannot resolve the pin, skips the wire, and 9 connections vanish. The firmware never checks the hardware either — `digitalWrite` on an unconnected pin returns happily and the serial log still looks great. **A clean serial log is not proof the wiring is right.**
 
-**3. 元件摆位违背「引脚朝向板」。** 舵机的三个脚在封装左边缘，摆在板左侧时，线必须横穿舵机机身才能到板——图上就是一条线从舵机中间划过去。改到板右侧，引脚自然对着板。同理：LED、蜂鸣器、HC-SR04 的引脚在底边，就该摆在板的上/下方；电阻无极性，让靠近板的那一端接板（`esp:2→rL:2`、`rL:1→eyeL:A`）。
+**3. Part placement ignored "pins face the board".** A servo's three pins sit on its left edge; park it left of the board and the wire has to cross the servo body to reach the board — on screen, a line straight through the part. Move it to the right and the pins naturally face the board. Same rule elsewhere: LED, buzzer and HC-SR04 have their pins on the bottom edge, so they belong above or below the board; a resistor has no polarity, so let the end nearer the board be the one that connects to it (`esp:2→rL:2`, `rL:1→eyeL:A`).
 
-修好后的数字：`parts=9 wires=18/18 crossings=0 UNRESOLVED=0 pins=38/38`。
+After the fix: `parts=9 wires=18/18 crossings=0 UNRESOLVED=0 pins=38/38`.
 
-## 学到什么
+## Takeaways
 
-- **ESP32 驱动舵机不需要库**：`ledcAttach(pin, 50, 16)` + 脉宽 `500 + angle*2000/180` 微秒换算成 16 位占空比即可。少一个依赖，工程就能被原样复制到别处编译。
-- **要让日志证明分支**：状态机的每条转移打一行固定格式日志，再用 `scenario.yaml` 制造触发条件。这是无头仿真里唯一能自动断言的证据。
-- **渲染器的数字要能被质疑**：`check_circuit.js` 会算穿板段数（必须 0）、悬停热点数与引脚总数（必须相等）、空 `<title>` 数（必须 0）、**标注数**（每个非主器件的 `id` + 型号 + 每个引脚名都要印出来，必须等于 `diagram.json` 的声明值）、**共线长度**（两根不相干的线压在一起的比例必须 ≤ 1%，同一引脚汇合出来的母线单列为 `bus` 只报告）。这些断言存在的理由，就是上面第 2 条那种"没有断言所以没人发现"的错误。
+- **An ESP32 can drive a servo with no library at all**: `ledcAttach(pin, 50, 16)` and convert `500 + angle*2000/180` µs into a 16-bit duty. One less dependency means the project still compiles when copied somewhere else.
+- **Make the log prove the branch**: print one fixed-format line per state transition, then use `scenario.yaml` to create the trigger. In a headless simulation that is the only assertable evidence you get.
+- **Numbers from the renderer must be challengeable**: `check_circuit.js` counts board-crossing segments (must be 0), hover hotspots vs. total pins (must be equal), empty `<title>`s (must be 0), **labels** (every non-board part prints its `id`, type and every pin name — the count must equal what `diagram.json` declares) and **shared length** (two unrelated wires drawn on each other must stay at or under 1% of total wire length; a run shared out of the *same* pin is a junction and is reported separately as `bus`). Those assertions exist because of failure mode 2 above — nobody noticed, because nothing was asserted.
 
-## 校验（三项全绿才算交付）
+## Verify (all three must be green)
 
 ```bash
 node ../../scripts/verify_viewer.js .
 node ../../scripts/domrun.js sim-viewer.html
 node ../../scripts/check_circuit.js
 ```
-
-`check_circuit` 这一行会打印 `labels=8/20`（8 个非主器件、20 个引脚名）和 `shared=0u/0.00%`
-（没有两根线压在一起），两个都必须落在上面说的门槛内。

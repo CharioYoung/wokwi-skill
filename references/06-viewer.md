@@ -1,30 +1,30 @@
-# 06 · 结果查看器：让"无头仿真"变成能看能点的页面
+# 06 · Result viewer: turning a headless simulation into a page you can see and click
 
-**中文** | [English](06-viewer.en.md)
+[中文](06-viewer.zh.md) | **English**
 
-## 为什么需要它
+## Why it exists
 
-`wokwi-cli` 是 headless 工具：
+`wokwi-cli` is a headless tool:
 
-- 不创建 wokwi.com 网页工程，不返回可查看的 URL；
-- `--screenshot-part` 只对**带显示缓存（framebuffer）**的元件有效（OLED/LCD）；
-- LED 这类元件只能截到 **16×16 缩略图**（实测 101 字节），不设 part 时常常 0 字节。
+- it does not create a wokwi.com web project and returns no viewable URL;
+- `--screenshot-part` only works on parts **with a display framebuffer** (OLED/LCD);
+- simple parts such as an LED only yield a **16×16 thumbnail** (measured: 101 bytes), and without a part the file is often 0 bytes.
 
-所以"让人看到效果并交互"的最稳方案是：**用真实串口日志驱动一个本地 HTML**，再用 `present_files` 弹出来。
+So the most reliable way to "let a human see and interact with it" is: **drive a local HTML page with the real serial log**, then open it with `present_files`.
 
-它不是"假动画"：页面里的时序、状态、数值全部来自真实仿真日志。电路图也不是手画的装饰——它**直接解析 `diagram.json` 渲染**（见第 3 节），所以不会出现"图和实际接法对不上"的情况。
+The timing, states and values on the page all come from the real simulation log. The circuit picture is not decoration either: it is **rendered from `diagram.json`** (section 3), so the drawing cannot disagree with how the circuit is actually wired.
 
 ---
 
-## 1. 文件结构（模板约定）
+## 1. File structure (template convention)
 
 ```html
-<script type="text/plain" id="inoSrc">   完整 .ino 原文（浏览器不解析转义）
+<script type="text/plain" id="inoSrc">   full .ino source (the browser does not interpret escapes)
 </script>
-<script type="text/plain" id="diaSrc">   完整 diagram.json 原文
+<script type="text/plain" id="diaSrc">   full diagram.json source
 </script>
 <script>
-/* === PCB-VIEW BEGIN ===  电路渲染器（由 scripts/pcbview.js 生成，勿手改）
+/* === PCB-VIEW BEGIN ===  circuit renderer (generated from scripts/pcbview.js - do not edit here)
    PcbView.render(diagram, {brightness}) -> {svg, audit} */
 /* === PCB-VIEW END === */
 </script>
@@ -33,43 +33,43 @@ function rawSrc(id){ ... }
 const INO = rawSrc("inoSrc");
 const DIA = rawSrc("diaSrc");
 
-const CFG = { name, actors[], sequence[], selection[], rawLog };   // ← 必须在渲染器之前
+const CFG = { name, actors[], sequence[], selection[], rawLog };   // <- must come before the renderer
 
-/* 页面逻辑：drawPcb / setOne / setState / runAuto / log /
+/* page logic: drawPcb / setOne / setState / runAuto / log /
    renderNetlist / showTab / copyFile / boot */
 </script>
 ```
 
-`assets/viewer-template.html` 就是这套结构，复制即可用。
+`assets/viewer-template.html` already has this structure — copy it.
 
-**两个同步工具（别手抄）：**
+**Two sync tools (never copy by hand):**
 
-| 命令 | 作用 |
+| Command | What it does |
 |---|---|
-| `node scripts/sync_embed.js <项目目录>` | 把真实 `.ino` / `diagram.json` 写进页面的两个 `text/plain` 块 |
-| `node scripts/sync_pcbview.js` | 把 `scripts/pcbview.js` 写进所有页面的 PCB-VIEW 块 |
+| `node scripts/sync_embed.js <projectDir>` | writes the real `.ino` / `diagram.json` into the page's two `text/plain` blocks |
+| `node scripts/sync_pcbview.js` | writes `scripts/pcbview.js` into the PCB-VIEW block of every page |
 
-两者都支持 `--check`（只校验不写），CI 就跑这个模式。手抄一次 `.ino` 就出过事故（贴了"精简展示版"导致 `selfTest was not declared`），所以这一步交给工具。
+Both accept `--check` (verify only); that is what CI runs. Pasting a `.ino` by hand has already caused one incident (a trimmed "demo" build produced `selfTest was not declared`), so the tool owns that step.
 
 ---
 
-## 2. 从零定制：只改 CFG
+## 2. Customising from scratch: only edit CFG
 
-### 2.1 `actors` —— 有几个"被执行的东西"
+### 2.1 `actors` — how many "things get driven"
 
 ```js
 actors: [
-  { id:"red",    label:"红灯", gpio:25, color:"#ef4444", on:"#ff5f57" },
-  { id:"yellow", label:"黄灯", gpio:26, color:"#f59e0b", on:"#fbbf24" },
-  { id:"green",  label:"绿灯", gpio:27, color:"#22c55e", on:"#34d399" }
+  { id:"red",    label:"Red",    gpio:25, color:"#ef4444", on:"#ff5f57" },
+  { id:"yellow", label:"Yellow", gpio:26, color:"#f59e0b", on:"#fbbf24" },
+  { id:"green",  label:"Green",  gpio:27, color:"#22c55e", on:"#34d399" }
 ]
 ```
 
-- `id` **必须与 `diagram.json` 里元件的 `id` 完全一致**（渲染器用它对应）；
-- `gpio` 是丝印文字，仅显示；
-- `color` 熄灭色、`on` 点亮色。
+- `id` **must exactly match the part `id` in `diagram.json`** (the renderer maps by it);
+- `gpio` is silkscreen text, display only;
+- `color` is the off colour, `on` the lit colour.
 
-### 2.2 `sequence` —— 自动循环
+### 2.2 `sequence` — the automatic cycle
 
 ```js
 sequence: [
@@ -79,11 +79,11 @@ sequence: [
 ]
 ```
 
-`dur` 用**真实固件里的毫秒数**（`delay(4000)` 就写 4000）。没有自动循环的项目留空数组，靠按钮控制。
+`dur` must be the **milliseconds from the real firmware** (`delay(4000)` → 4000). Projects without an automatic cycle use an empty array and rely on buttons.
 
-### 2.3 `rawLog` —— 真实串口日志
+### 2.3 `rawLog` — the real serial log
 
-把 `--serial-log-file` 落盘的内容**原样粘进来**。这是"证据"，不是装饰。
+Paste the contents written by `--serial-log-file` **verbatim**. This is evidence, not decoration.
 
 ```js
 rawLog: `=========================================
@@ -94,165 +94,170 @@ rawLog: `=========================================
 [TRAFFIC] GREEN  ON  (4s)`
 ```
 
-### 2.4 `selection` —— 选型理由
+### 2.4 `selection` — why these parts
 
 ```js
 selection: [
-  { need:"主控要能跑状态机、串口可观", choice:"ESP32 DevKit C", reason:"GPIO 够用；自带串口；Wokwi part = board-esp32-devkit-c-v4" },
-  { need:"红/黄/绿三色指示", choice:"wokwi-led ×3", reason:"Wokwi 只提供单色 LED 模型，3 个不同 color 组合最直观" }
+  { need:"MCU that runs a state machine with observable serial", choice:"ESP32 DevKit C", reason:"enough GPIO; serial built in; Wokwi part = board-esp32-devkit-c-v4" },
+  { need:"red/yellow/green indicators", choice:"wokwi-led x3", reason:"Wokwi only ships single-colour LED models; three parts with different color is the clearest" }
 ]
 ```
 
-### 2.5 两个原始文本块
+### 2.5 The two raw text blocks
 
-**直接粘贴项目里真实的 `.ino` 和 `diagram.json` 全文**，一个字都不要改（见铁律 1）。
+**Paste the full, real `.ino` and `diagram.json` from the project** — not one character changed (see hard rule 1).
 
 ---
 
-## 3. 电路图是"渲染"出来的，不是画的
+## 3. The circuit picture is rendered, not drawn
 
-早期版本用 CSS 拼了一张"灰盒子 + 三个灯泡"，看着还行，但**没有引脚名、没有连线**，等于一张插图：既没法核对接法，也解释不了"为什么 GPIO25 接红灯"。现在改为由 `diagram.json` 实时渲染。
+The first version was a CSS mock ("a grey box plus three bulbs"). It looked fine but had **no pin names and no wires**, which makes it an illustration: you cannot check a connection against it, and it never explains why GPIO25 drives the red LED. It is now rendered from `diagram.json`.
 
-### 3.1 数据从哪来
+### 3.1 Where the data comes from
 
-| 内容 | 来源 |
+| What | Source |
 |---|---|
-| 元件 `top` / `left` / `attrs` / `rotate` | 项目自己的 `diagram.json` |
-| LED、电阻、舵机的外形与引脚位置 | Wokwi 官方开源库 `@wokwi/elements`（MIT） |
-| 电阻色环 | 官方色码表按 `value` 现算（`330` → 橙-橙-棕） |
-| 排针间距 9.5 单位 | 官方元件里 19 个引脚的 `y` 值反推，等于真实 2.54 mm |
-| Mega 的 85 个引脚坐标 | 官方 `arduino-mega-element` 的 `pinInfo` 原样搬进 `MEGA_PINS` |
-| 连线端点与线色 | `connections` 逐条读；绿 = 信号，红 = V+，黑 = GND |
+| part `top` / `left` / `attrs` / `rotate` | the project's own `diagram.json` |
+| LED, resistor and servo outline plus pin positions | Wokwi's open-source `@wokwi/elements` (MIT) |
+| resistor colour bands | the official colour table, computed from `value` (`330` -> orange-orange-brown) |
+| 9.5-unit header pitch | reverse-engineered from the 19 pin `y` values in the official part; it equals the real 2.54 mm |
+| the Mega's 85 pin coordinates | the official `arduino-mega-element` `pinInfo`, copied verbatim into `MEGA_PINS` |
+| wire endpoints and colours | read from `connections`; green = signal, red = V+, black = GND |
 
-开发板是画出来的：开源库只有 30 脚的 `esp32-devkit-v1`，而 diagram 用的是 38 脚 `board-esp32-devkit-c-v4`，所以板框按真实 2.54 mm 排针网格重建。板卡进 `BOARDS` 注册表就能用，目前两张：
+The board outline is drawn here: the open-source package only ships the 30-pin `esp32-devkit-v1`, while diagrams use the 38-pin `board-esp32-devkit-c-v4`, so the board is rebuilt on the real 2.54 mm header grid. A board only has to enter the `BOARDS` registry to work; there are two today:
 
 ```js
-'traffic-light', 'remote-switch'  →  board-esp32-devkit-c-v4   (38 脚)
-'servo-ring'                      →  wokwi-arduino-mega        (85 脚)
+'traffic-light', 'remote-switch'  ->  board-esp32-devkit-c-v4   (38 pins)
+'servo-ring'                      ->  wokwi-arduino-mega        (85 pins)
 ```
 
-**不认识的板卡直接抛错**，而不是猜一个板框画上去：
+**An unknown board throws instead of guessing an outline:**
 
 ```js
 throw new Error('diagram.json has no supported board. Known: ... ' +
   'Add one to BOARDS in pcbview.js (pin coordinates are in @wokwi/elements) instead of guessing.');
 ```
 
-### 3.2 走线规则
+### 3.2 Routing rules
 
-导线一律**正交折线**，从引脚出发先走出器件，再绕到板外，**绝不横穿 PCB**：
+Wires are always **orthogonal polylines**. They leave a pin, step clear of the part, then run outside the board — **never across the PCB**:
 
-- 一端在排针、另一端在板外且同侧 → 直接拐出去；
-- 两端分居两侧 → 从最近的水平边绕过去，每条线占一条独立轨道（`lanes`），避免叠成一根粗线；
-- 两端都是板外零件（舵机的 V+/GND 串接链）→ 提 10 种标准折法，用 Liang-Barsky 量每条压在板上的长度，**取压得最少、其次最短的那条**；
-- 竖直线段也按"可用空隙"分配通道数（`VMAX`），密集的图会自动收敛而不是撞到旁边的元件。
+- one end on a header, the other outside on the same side -> step straight out;
+- ends on opposite sides -> wrap around the nearer horizontal edge, each wire taking its own lane so they never stack into one thick band;
+- both ends outside the board (the chained servo V+/GND runs) -> propose ten standard bends, measure how much of each would land on the PCB with Liang-Barsky, and keep the one that crosses least and is then shortest;
+- vertical runs are also given a channel count derived from the free space (`VMAX`), so a dense diagram tightens up instead of ploughing through the parts beside the board.
 
-三条硬规矩，都是被真实工程打出来的：
+Three hard rules, all forced out by a real project:
 
-1. **拐点按板边算，不按引脚算**。Mega 的数字排针是双列，内列离板边还有 13 unit；以"引脚 + 间距"算拐点，拐点就落在板子里，竖线贴着排针从 PCB 上划过去。
-2. **双列中内列的引线必须穿出板边**。`out = min(ox - depth, bx0 - depth)` —— 取"从引脚算"和"从板边算"里更靠外的那一个。
-3. **板外零件之间的线不能只画 L 形**。环形阵列里"左右两侧的舵机连 V+" 这种线，L 形一定穿板，必须绕上/下边。
+1. **Measure the turn from the board edge, not from the pin.** The Mega's digital header is a double column and its inner column sits 13 units inside the edge; measuring "pin plus a gap" put the turn inside the footprint, and the vertical run then slid across the PCB along the header.
+2. **A pin in the inner column has to lead out past the edge.** `out = min(ox - depth, bx0 - depth)` — take whichever of "from the pin" and "from the edge" is further out.
+3. **A wire between two off-board parts cannot just be an L.** "Left-side servo to right-side servo V+" always cuts the board as an L; it has to wrap over the top or bottom edge.
 
-`PcbView.render()` 返回的 `audit` 是硬指标：
+`PcbView.render()` returns `audit` as the hard numbers:
 
-| 字段 | 含义 | 要求 |
+| Field | Meaning | Requirement |
 |---|---|---|
-| `wires` | 解析成功并画出来的连线数 | 等于 `connections` 去虚线的数量 |
-| `crossings` | 压到板框的线段数（Liang-Barsky 逐段求交） | **必须 0** |
-| `leads` | 压到板框、但端点是引脚自身的那一小段 | 不参与判定，只报数 |
-| `mode` | `avoid`（默认）/ `direct` | —— |
+| `wires` | connections resolved and drawn | equals `connections` minus the virtual ones |
+| `crossings` | segments overlapping the board footprint (Liang-Barsky, segment by segment) | **must be 0** |
+| `leads` | segments overlapping the board whose endpoint is a pin itself | not part of the verdict, reported only |
+| `mode` | `avoid` (default) / `direct` | - |
 
-`leads` 为什么不算错：零件压在板边时（32 舵机环每个拐角都这样），它的引脚坐标**就在板框内部**，导线只能从板子里起笔。这是布局事实，不是走线选择。
+Why `leads` is not an error: when a part sits on the board edge — which the 32-servo ring does at every corner — its pin coordinate is **inside the footprint**, so the wire can only start on the PCB. That is a layout fact, not a routing choice.
 
-`route:'direct'` 是逃生舱：出引脚 14 unit 就正交连过去，不绕板。只用于板卡引脚朝上/朝下这种 `avoid` 不认识的布局。**密集图不要用它** —— 32 舵机环用 direct 会有 21 段线横穿 PCB，用默认的 avoid 是 0 段。
+`route:'direct'` is the escape hatch: step 14 units out of the pin and join orthogonally without avoiding the board. It exists for boards whose pins face up or down, which `avoid` does not model. **Do not use it on a dense diagram** — the 32-servo ring gets 21 segments across the PCB with `direct`, and 0 with the default `avoid`.
 
-### 3.3 交互
+### 3.3 Interaction
 
-- **LED 亮度**由页面状态驱动：`PcbView.setBrightness(host, partId, 0..1)`，PWM 项目直接喂 `duty/255`；
-- **舵机角度**：`PcbView.setAngle` 只改一个件的喇叭口（不重绘整图），`transform` 由 `PcbView.hornTransform(deg)` 给出；32 个舵机每秒更新几十次也不掉帧；
-- 点图上的灯 = 切到该灯的手动模式；
-- 悬停**任意引脚**（用到没用到的都算）显示 `引脚名 · → 目标`，空闲引脚显示 `引脚名 · (未使用)`；悬停时该焊盘会亮起青色环；
-- 悬停**导线**显示 `起点 → 终点`（`<title>`），线会变粗；**不要再给导线加 `cursor:help`** —— 浏览器会在箭头旁画一个问号，用户会当成报错（已经踩过）；
-- 「放大」按钮把整张图铺满视口（`position:fixed` + `inset:0`），再点「还原」或按 <kbd>Esc</kbd>
-  回到卡片里。
+- **LED brightness** follows page state via `PcbView.setBrightness(host, partId, 0..1)`; a PWM project just feeds `duty/255`;
+- **servo angle**: `PcbView.setAngle` turns one horn without redrawing the diagram, and `PcbView.hornTransform(deg)` gives the `transform`; 32 servos updating dozens of times a second still hold frame rate;
+- clicking a lamp in the drawing switches to that lamp's manual mode;
+- hovering **any pin** (used or not) shows `pin · -> target`, and a free pin shows `pin · (unused)`; the pad lights up with a cyan ring while hovered;
+- hovering a **wire** shows `from -> to` (SVG `<title>`) and thickens it. **Do not put `cursor: help` on wires** — the browser then paints a question mark beside the arrow and users read it as an error (this already happened);
+- the **zoom** button lifts the drawing into a full-viewport layer (`position:fixed` + `inset:0`);
+  **还原** or <kbd>Esc</kbd> puts it back in the card.
 
-  两条踩过的坑，改之前先看：
+  Two traps, both already hit:/n
+  1. **Zoom must not be "remove `max-height`".** A drawing that was never clipped - which is most
+     of them at normal window sizes - does not change by a single pixel, and the user reports the
+     button as broken. Swap in a genuinely different, viewport-sized state.
+  2. **A `fixed` element needs `100vh`, not `100%`.** Its height comes from the `top`/`bottom`
+     stretch, so its computed height stays `auto`; a child's percentage height then resolves
+     against `auto`, falls back to `auto`, and the svg grows by width until `overflow:hidden`
+     cuts it off. Once the svg fills the viewport, the default `preserveAspectRatio(meet)`
+     centres the whole drawing inside it and nothing is lost.
 
-  1. **放大不能只是「解除 `max-height`」**。如果那张图本来就没被裁（多数图在常见窗口下都没裁），
-     解除后一个像素都不会变，用户会直接判定按钮坏了。要真的换一个铺满视口的状态。
-  2. **`fixed` 元素的高度必须写 `100vh`，不能写 `100%`**。靠 `top/bottom:0` 拉伸出来的高度，
-     其 computed height 仍然是 `auto`，子元素的百分比高度会据此失效、退回 `auto` —— 于是 svg
-     按宽度撑高、冲出视口被 `overflow:hidden` 裁掉一截。svg 撑满视口后，默认的
-     `preserveAspectRatio(meet)` 会自己把整图居中放进去，任何一角都不会丢。
+Every pin name is printed, the way a real board is silkscreened; the pins the circuit uses are brighter and carry a cyan ring. Printing only the used ones made people ask "what are all those empty pins?"
 
-引脚丝印是**全部引脚都打印**的（真实板子就是这么印的），其中电路用到的引脚更亮、并带青色环；只印用到的引脚会让人问"旁边那些空脚是什么"。
+A double-row header needs special treatment or every name lands on a pad: the columns are only 10 units apart and a pad is 6.8 wide, so there is no gutter for text. **The inner column is named inboard of itself, the outer one in the margin inside the board edge.**
 
-双列排针的丝印要特殊处理，否则名字全压在焊盘上：两列只隔 10 unit、焊盘直径 6.8，中间塞不下字。**内列名字写在自己内侧，外列名字写在板边留白里**。
+### 3.4 Things not to do
 
-### 3.4 不要做的事
-
-- **不要手绘电路图**。哪怕画得再像 —— 一只鸭子、一个灰盒子、三颗灯泡 —— 它都不是电路，
-  读者看不到哪个引脚连到哪。而且手绘图会**掩盖坏掉的 `diagram.json`**：项目里 7 个引脚名是编的
-  （`buzz:+` 而不是 `buzz:1`、`servo:SIG` 而不是 `PWM`、`esp:GND.6` 而 ESP32 只有 GND.1~GND.3），
-  渲染器会把这些线跳过，手绘图则照画不误，看起来一切正常。`verify_viewer.js` 现在会在页面里
-  找不到 `PcbView.render(` 时直接失败。
-- **串口日志正常 ≠ 接线正确**。固件不会检查电路：GPIO 上没接灯，`digitalWrite` 照样返回，
-  串口照样打印。判断接线对不对，只能看 `check_circuit.js` 的 `UNRESOLVED` 是不是 0。
-- **元件要摆成"引脚朝向板"**。舵机的三个引脚在左边缘，放在板左侧时，线从引脚出来必须横穿舵机
-  机身才能到板 —— 图上就是一条线直接从舵机中间划过去。放到板右侧，引脚自然对着板，线最短且
-  不穿件。电阻无极性，让靠近板的那一端接板即可。LED / 蜂鸣器 / HC-SR04 的引脚在底边，摆到
-  板的上方或下方，线从底下绕出去。
-- **不要为某个项目手改这张图**。图跟着 `diagram.json` 变，改图等于骗人。
-- **`viewBox` 必须包住旋转后的元件外形**。舵机转 11° 就比它自己的 footprint 高 30 个单位，
-  用 `left/top + size` 算会把底部的喇叭口裁掉 15 单位。带 `rotate` 的元件一律改用旋转后的
-  AABB：`w' = |w·cos| + |h·sin|`、`h' = |w·sin| + |h·cos|`，再以 footprint 中心加减一半。
-  这种裁切在卡片里被 `max-height` 盖住看不出来，只有放大到全屏才暴露 —— 所以别只信缩略图。
-- **不要手改页面里的 PCB-VIEW 块**。它由 `scripts/pcbview.js` 生成，改完跑 `node scripts/sync_pcbview.js`。
-- **不要为了让某个图 `crossings=0` 去挪 `diagram.json` 里的零件**。图的出处必须和真实仿真一致；挪了就不是同一个电路了。（唯一例外是零件压进板子里 7 unit 这种明显的数据缺陷，处理方式见 `nudge()`，且要在查看器里写明。）
-- 元件库目前覆盖 ESP32 开发板、Arduino Mega、`wokwi-led`、`wokwi-resistor`、`wokwi-servo`、`wokwi-buzzer`、`wokwi-hc-sr04`。要加按键/OLED，在 `pinsOf()` 里补上官方 `pinInfo` 的引脚坐标、在 `sizeOf()` 里补上 `mm × 3.7402` 的尺寸、再写一个 `xxxSvg()` 即可；**没登记的元件 `pinsOf` 返回 `{}`，它的线会被静默跳过** —— 所以新增元件类型时，先跑一遍 `check_circuit.js` 确认 `UNRESOLVED=0`。
+- **Do not hand-draw the circuit.** However convincing it looks - a duck, a grey box, three bulbs - it is
+  not a circuit, and the reader cannot see which pin goes where. Worse, a drawing **hides a broken
+  `diagram.json`**: one project had seven invented pin names (`buzz:+` instead of `buzz:1`, `servo:SIG`
+  instead of `PWM`, `esp:GND.6` when an ESP32 only has GND.1-GND.3). The renderer skips those wires;
+  a drawing happily shows them anyway, so everything looks fine. `verify_viewer.js` now fails when the
+  page never calls `PcbView.render(`.
+- **A healthy serial log does not mean the wiring is right.** Firmware never checks the circuit: a
+  `digitalWrite` to a pin with no LED still returns, and the log still prints. The only proof is that
+  `check_circuit.js` reports 0 `UNRESOLVED`.
+- **Place each part so its pins face the board.** A servo has its three pins on the left edge; put it
+  left of the board and every wire has to cut straight through the servo body to reach the header. Put
+  it on the right and the pins already point at the board - shortest wire, nothing crossed. Resistors
+  are unpolarised, so connect whichever end faces the board. LEDs, buzzers and the HC-SR04 have their
+  pins on the bottom edge: park them above or below the board so the wire can leave downwards.
+- **Do not hand-edit the drawing for one project.** It follows `diagram.json`; editing it by hand means lying.
+- **The `viewBox` must contain a rotated part's real outline.** A servo turned by 11 degrees is
+  30 units taller than its own footprint, so `left/top + size` clips 15 units off the bottom horns.
+  For anything with `rotate`, use the rotated AABB instead:/n  `w' = |w*cos| + |h*sin|`, `h' = |w*sin| + |h*cos|`, centred on the footprint centre. That crop is
+  invisible while the card caps the height with `max-height` - it only shows at full screen, so do
+  not trust the thumbnail.
+- **Do not hand-edit the PCB-VIEW block.** It is generated from `scripts/pcbview.js`; edit that and run `node scripts/sync_pcbview.js`.
+- **Do not move parts in `diagram.json` just to make a diagram reach `crossings=0`.** The drawing has to match the real simulation; move a part and it is no longer the same circuit. (The one exception is a part parked 7 units inside the board — an obvious data defect handled by `nudge()`, and the viewer has to say so.)
+- The element library currently covers the ESP32 board, the Arduino Mega, `wokwi-led`, `wokwi-resistor`, `wokwi-servo`, `wokwi-buzzer` and `wokwi-hc-sr04`. To add a button or an OLED: copy the pins from the official `pinInfo` into `pinsOf()`, set the size in `sizeOf()` as `mm * 3.7402`, and write an `xxxSvg()`. **An unregistered part returns `{}` and its wires are skipped silently** - so after adding a part type, run `check_circuit.js` and confirm `UNRESOLVED=0`.
 
 ---
 
-## 4. 六条铁律（血泪换来的）
+## 4. The six hard rules (each paid for in blood)
 
-### 铁律 1：必须是"实际编译通过的原文"
+### Hard rule 1: it must be the verbatim source that actually compiled
 
-**踩过的坑**：曾把"精简展示版"放进页面（调用了 `selfTest()` 却删掉了它的定义），用户复制到 Wokwi 直接：
+**What happened**: a "simplified display version" was put on the page (it called `selfTest()` but the definition had been removed). The user copied it into Wokwi and got:
 
 ```
 error: 'selfTest' was not declared in this scope
 ```
 
-展示版 ≠ 可编译版。函数、宏、全局变量，一个都不能删。注释可以少。
+A display version is not a compilable version. Functions, macros and globals — none may be removed. Comments may be trimmed.
 
-### 铁律 2：绝不能用 JS 模板字符串承载 C/C++ 代码
+### Hard rule 2: never carry C/C++ code in a JS template literal
 
-**踩过的坑（更阴）**：
+**What happened (subtler)**:
 
 ```js
 const INO = `... String cmd = Serial.readStringUntil('\n'); ...`
 ```
 
-浏览器解析模板字符串时把 `\n` 变成**真换行**，用户复制到的代码变成：
+When the browser parses the template literal, `\n` becomes a **real newline**, so what the user copies is:
 
 ```cpp
 String cmd = Serial.readStringUntil('
 ');
 ```
 
-Wokwi 报：
+Wokwi then reports:
 
 ```
 error: missing terminating ' character
 ```
 
-凡是含 `\n` `\r` `\t` `\"` `\\` 的 C/C++ 代码都会中招。**JS 的转义规则和 C 的不是一回事。**
+Any C/C++ code containing `\n` `\r` `\t` `\"` `\\` is affected. **JS escaping rules are not C escaping rules.**
 
-正确写法：
+The correct form:
 
 ```html
 <script type="text/plain" id="inoSrc">
-...整段原文...
+...the entire source...
 </script>
 <script>
 function rawSrc(id){
@@ -264,125 +269,122 @@ const INO = rawSrc("inoSrc");
 </script>
 ```
 
-好处：**页面显示的 = 剪贴板复制的 = 原始文件**，三者必然一致。
+The benefit: **what the page shows = what the clipboard copies = the original file**, guaranteed.
 
-### 铁律 3：校验必须模拟浏览器取值
+### Hard rule 3: verification must simulate how the browser reads the value
 
-**踩过的坑**：用正则从 HTML **原始文本**里抽 `const INO = \`...\`` 去编译——抽到的是 `\` + `n` 两个字符（原文就是这样），编译当然通过，**假阳性**，把真问题漏掉了。
+**What happened**: a regex pulled `const INO = \`...\`` out of the HTML **source text** and compiled it — but it extracted the two characters `\` + `n` (which is how the source stores it), so compilation passed. A **false positive** that hid the real bug.
 
-必须按 `rawSrc()` 同样的归一化逻辑取 `textContent`，与真实文件**逐字节比对**，再编译：
-
-```bash
-node scripts/verify_viewer.js <项目目录>
-```
-
-### 铁律 4：改已有页面只能"外科手术"
-
-**踩过的坑**：批量替换时用 `html.slice(0, html.lastIndexOf('<script>'))` 做前缀——等价于**丢弃 `<script>` 到目标位置之间的全部代码**。红绿灯页面正好把 `const CFG` 放在 `const INO` 之前，于是 CFG 被整段删掉，页面打开白屏（`CFG is not defined`），而 `node --check` **查不出来**（语法合法）。
-
-规则：
-
-1. 只替换目标区间（`const INO = \`` 到 `` \`; ``），不要从标签处截断；
-2. 改动前后核对脚本里的顶层定义数量没少；
-3. 改完必须跑运行时校验：
+You must read `textContent` with the same normalisation as `rawSrc()`, compare **byte for byte** with the real file, and only then compile:
 
 ```bash
-node scripts/domrun.js <项目目录>/sim-viewer.html
+node scripts/verify_viewer.js <project-dir>
 ```
 
-它会用假 DOM 真跑一遍 `boot()`，输出灯数、连接表字符数、选型表字符数、代码长度、串口行数、**错误数**。
+### Hard rule 4: editing an existing page must be surgical
 
-**判据：错误数必须为 0**，tower 灯数与设计一致，连接表/选型表非空。
+**What happened**: a batch replacement used `html.slice(0, html.lastIndexOf('<script>'))` as the prefix — which is equivalent to **discarding everything between `<script>` and the target position**. The traffic-light page happened to place `const CFG` before `const INO`, so CFG was deleted wholesale and the page opened blank (`CFG is not defined`), while `node --check` **could not catch it** (the syntax was valid).
+
+Rules:
+
+1. replace only the target range (`const INO = \`` through `` \`; ``), never truncate from a tag;
+2. compare the number of top-level definitions in the script before and after;
+3. always run the runtime check afterwards:
+
+```bash
+node scripts/domrun.js <project-dir>/sim-viewer.html
+```
+
+It really executes `boot()` in a fake DOM and reports lamp count, netlist characters, selection-table characters, code length, serial line count and **error count**.
+
+**Acceptance: the error count must be 0**, the tower lamp count must match the design, and the netlist/selection tables must be non-empty.
 
 ---
 
-### 铁律 5：电路图只能渲染，不能手绘
+### Hard rule 5: the circuit diagram is rendered, never hand-drawn
 
-页面里必须有 `PcbView.render(diagram)` 调用，`verify_viewer.js` 的 check 1b 找不到就直接 FAIL。图上少一条线，就是 `diagram.json` 少一条线或引脚名写错 —— **不要在看图器里补、不要猜、不要美化**，补出来的线是不可信的。
+The page must call `PcbView.render(diagram)`; check 1b in `verify_viewer.js` fails outright when it cannot find it. A missing wire on the picture means a missing wire in `diagram.json` or a misspelt pin name — **do not add it in the viewer, do not guess, do not beautify**. A line you drew yourself is a line nobody can trust.
 
-手绘图会掩盖坏掉的 `diagram.json`，而串口日志又证明不了接线。这三层「看起来正常」的失效模式，连同元件朝向、`viewBox` 裁切等细节，见上面 [3.4 不要做的事](#34-不要做的事)。
-
----
-
-### 铁律 6：图上要能读出"这是什么、哪只脚"，且没有两根线压在一起
-
-看图的目的是**照着接线**。只画主器件（ESP32/Mega）不画周边器件，等于只给了一半信息：
-
-- 每个**非主器件**都要印 `id` + 精确型号 + 每个引脚名（`legL` / `舵机 · wokwi-servo` / `GND V+ PWM`），
-  型号取自 `diagram.json` 的 `type` 原文，改名图就跟着改，不做手写映射；
-- 标签放**空档**：先试下、上、右、左，再试同样四个方向外推一格，用"占用数最少"打分而不是"第一个空位"——
-  32 个舵机挤成一圈时，所有空档都被占满，"第一个空位"会把八个标签排成一排；
-- 已接线引脚名用深色加粗，未接线用浅灰，一眼能看出"这根线接没接"；
-- **两根不相干的线不许共线**：共线处长过 6 个单位（约一个线宽）时，图上就是一根线，读者无法跟踪。
-
-判据是 `check_circuit.js` 的两个字段：
-
-```
-labels=32/96    ← 已标注器件数 / 已标注引脚数，必须等于 diagram.json 声明值
-shared=193.5u/0.55%  ← 无关线共线总长及其占总走线长度比例，必须 ≤ 1%
-bus=275.4u      ← 同一引脚出发的母线共享（原理图里的汇合点），只报告不判失败
-```
-
-`shared` 超 1% 就 FAIL 并打印具体是哪两根线、共线多长。要压下去靠的是**通道分配**（见 3.2），
-不是事后挪线：两条走线只要区间不重叠就可以共用同一通道，通道是资源不是序号。
+A hand drawing hides a broken `diagram.json`, and a serial log cannot prove the wiring either. Those three ways of "looking fine", plus element orientation and `viewBox` cropping, are covered in [3.4 Don't do these](#34-dont-do-these).
 
 ---
 
-## 5. 适配不同类型项目
+### Hard rule 6: the picture must say what each part is, which leg is which, and no two wires may share a line
 
-| 项目类型 | 改什么 |
+The point of the picture is **to wire the thing up**. Drawing only the main board and leaving the buzzer, the servo and the LED unlabelled answers half the question:
+
+- every **non-board part** prints its `id`, its exact type and every pin name (`legL` / `舵机 · wokwi-servo` / `GND V+ PWM`). The type is the verbatim `type` from `diagram.json`, so renaming a part renames the label — never a hand-kept table;
+- the label goes into a **free gutter**: below, above, right, left, then the same four pushed out by one label. Score by "how many things does this box hit", not by "first free slot" — 32 servos in a ring fill every gutter, and first-free-slot lined eight labels up in one row;
+- a wired pin name is dark and bold, an unwired one is light grey, so "is this leg connected" is answerable at a glance;
+- **two unrelated wires may never share a line.** Past six units — about one stroke width — the picture shows one wire where the diagram has two, and the reader cannot follow either.
+
+Two fields of `check_circuit.js` are the acceptance test:
+
+```
+labels=32/96          parts labelled / pin names labelled, must equal what diagram.json declares
+shared=193.5u/0.55%   unrelated wires drawn on each other, and its share of total wire length; must be <= 1%
+bus=275.4u            shared run out of the *same* pin - a junction, the way a schematic draws one; reported, never failed
+```
+
+Above 1% `shared` the check FAILs and prints which two wires met and over what length. The fix is **lane allocation** (see 3.2), not nudging lines afterwards: two runs may share a channel whenever their spans do not overlap — a channel is a resource, not a sequence number.
+
+---
+
+## 5. Adapting to different project types
+
+| Project type | What to change |
 |---|---|
-| **数字量**（LED/继电器/蜂鸣器） | 直接用灯笼 `setOne(id,on)`；`sequence` 写各状态时长 |
-| **PWM**（呼吸/调光） | 把 `setOne` 换成按 duty 设透明度 + `box-shadow`；`log` 里打 `duty=` |
-| **传感器**（DHT/光敏/电位器） | 把灯笼区换成仪表盘/柱状条；`sequence` 改成定时采样，读数用真实日志值 |
-| **OLED/LCD** | 可以**真截图**（有 framebuffer）：`--screenshot-part <id> --screenshot-file shot.png`；页面里再画一块"屏幕"回放文字 |
-| **舵机/电机** | 画角度/转速指示器，`sequence` 驱动角度 |
-| **网络类** | 加"请求模拟"按钮，点击时写入 `[HTTP] GET /on -> 200` 这类日志行 |
+| **Digital** (LED/relay/buzzer) | use the lamp helper `setOne(id,on)`; put per-state durations in `sequence` |
+| **PWM** (breathing/dimming) | replace `setOne` with opacity + `box-shadow` driven by duty; log `duty=` |
+| **Sensors** (DHT/photoresistor/potentiometer) | swap the lamp area for a gauge or bar; `sequence` becomes periodic sampling with real values from the log |
+| **OLED/LCD** | a **real screenshot** is possible (framebuffer): `--screenshot-part <id> --screenshot-file shot.png`; additionally draw a "screen" in the page and replay the text |
+| **Servo/motor** | draw an angle or speed indicator; `sequence` drives the angle |
+| **Network projects** | add a "simulate request" button that appends log lines such as `[HTTP] GET /on -> 200` |
 
 ---
 
-## 6. 必带的四块"反黑盒"内容
+## 6. The four anti-black-box sections that must be present
 
-模板已内置，别删：
+Built into the template — do not delete them:
 
-1. **电路连接表** —— 运行时 `JSON.parse(DIA)`，把 `parts` 和 `connections` 逐条列成表格，用户可以核对每根线。
-2. **分文件复制** —— 两个按钮：「① 复制代码 → 贴到 sketch.ino」「② 复制电路 → 贴到 diagram.json」，明确哪个文件进哪个标签。
-3. **直达空白工程** —— 打开 `https://wokwi.com/projects/new/esp32`。说明 Wokwi 没有"URL 带代码直接运行"的接口，新工程必空白、必须粘贴。
-4. **选型决策表** —— `CFG.selection`，逐条写"需求点 → 选型 → 理由"。
+1. **Circuit connection table** — `JSON.parse(DIA)` at runtime and list every `parts` and `connections` entry so the user can verify each wire.
+2. **Per-file copy** — two buttons: "① copy code → paste into sketch.ino" and "② copy circuit → paste into diagram.json", making clear which file goes into which tab.
+3. **Direct link to a blank project** — opens `https://wokwi.com/projects/new/esp32`. Explain that Wokwi has no "run code from a URL" API, so a new project is always blank and pasting is required.
+4. **Selection rationale table** — `CFG.selection`, one row per "requirement → choice → reason".
 
-图形区要标注**数据来源**：现在的模板写的是「由 diagram.json 实时渲染，含真实引脚与连线」。这句话是真的（见第 3 节），但也别让它被读成"Wokwi 官方渲染"——它不是 Wokwi 的渲染引擎，没有实时电气仿真。
-
----
-
-## 7. 交互设计原则
-
-- 点按钮 → **立即**改变画面 + 同时往串口区写一行日志（等价于固件收到命令）；
-- 保留"自动/手动"两种模式，显示当前状态与剩余时间/读数；
-- 顶部徽章写"仿真通过（真实日志回放）"，并提供"查看原始串口日志"的可展开证据块；
-- 日志时间戳用真实节奏，不要快进到失真。
+The drawing area must state its **data source**; the template says "rendered live from diagram.json, with real pins and wires". That is true (section 3), but it must not be read as "rendered by Wokwi" — this is not Wokwi's rendering engine and there is no live electrical simulation behind it.
 
 ---
 
-## 8. 交付前检查清单
+## 7. Interaction design principles
 
-- [ ] `verify_viewer.js` 输出 `INO match real file: true`、`DIA match real file: true`
-- [ ] `domrun.js` 输出 `错误数: 0`
-- [ ] tower 灯数 = `CFG.actors` 长度 = `diagram.json` 里对应元件数
-- [ ] 连接表、选型表非空
-- [ ] 串口区内容 = 项目里真实 `serial.log` 内容
-- [ ] 页面里没有 `CFG` / `DIA` / `rawSrc` 的临时调试输出
-- [ ] 图形区标注了数据来源（由 diagram.json 渲染，非 Wokwi 引擎）
-- [ ] 没有把 token 写进页面
+- clicking a button **immediately** changes the picture and appends a log line at the same time (equivalent to the firmware receiving a command);
+- keep both "auto" and "manual" modes and show the current state plus remaining time / reading;
+- put a "simulation passed (real log replay)" badge at the top, and provide an expandable "view raw serial log" evidence block;
+- keep log timestamps at the real pace — do not fast-forward into distortion.
 
 ---
 
-## 9. 常见故障
+## 8. Pre-delivery checklist
 
-| 现象 | 原因 | 修复 |
+- [ ] `verify_viewer.js` reports `INO identical ... [PASS]` and `DIA identical ... [PASS]`
+- [ ] `domrun.js` reports `errors: 0`
+- [ ] tower lamp count = `CFG.actors.length` = the number of matching parts in `diagram.json`
+- [ ] netlist and selection tables are non-empty
+- [ ] the serial panel content equals the real `serial.log` in the project
+- [ ] no leftover debug output of `CFG` / `DIA` / `rawSrc`
+- [ ] the drawing area states its data source (rendered from diagram.json, not the Wokwi engine)
+- [ ] no token anywhere on the page
+
+---
+
+## 9. Common failures
+
+| Symptom | Cause | Fix |
 |---|---|---|
-| 打开全白、控制台 `CFG is not defined` | 改造时被截断 | 补回 `const CFG`，跑 `domrun.js` |
-| 灯不显示 | `actors.id` 与 `diagram.json` 的 id 不一致 | 逐字对齐 |
-| 复制代码到 Wokwi 报缺函数 | 用了精简版代码 | 换回编译原文 |
-| 复制代码报 `missing terminating ' character` | 用了 JS 模板字符串 | 改用 `text/plain` 块 |
-| 连接表空白 | `DIA` 为空或 JSON 解析失败 | 检查 `diaSrc` 块是否完整 |
-| `domrun.js` 报 `requestAnimationFrame is not defined` | 测试桩未实现 | 属于脚本问题，不是页面问题；补桩即可 |
+| opens completely blank, console says `CFG is not defined` | truncated during editing | restore `const CFG`, run `domrun.js` |
+| lamp does not render | `actors.id` does not match the id in `diagram.json` | align them character by character |
+| copying the code into Wokwi reports a missing function | a simplified version was used | switch back to the compiled source |
+| copying reports `missing terminating ' character` | a JS template literal was used | switch to a `text/plain` block |
+| netlist table is blank | `DIA` is empty or JSON parsing failed | check the `diaSrc` block is complete |
+| `domrun.js` reports `requestAnimationFrame is not defined` | the test stub is incomplete | that is a script problem, not a page problem — extend the stub |

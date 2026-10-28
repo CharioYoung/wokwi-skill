@@ -1,12 +1,12 @@
-# 04 · diagram.json 格式速查（写之前必读）
+# 04 · `diagram.json` quick reference (read before writing)
 
-**中文** | [English](04-diagram-schema.en.md)
+[中文](04-diagram-schema.zh.md) | **English**
 
-`diagram.json` 是电路的唯一描述文件。Wokwi 用它画出板子和连线，仿真器用它计算电学连接。**格式错一个字符，元件就不显示或连线不通。**
+`diagram.json` is the single description of the circuit. Wokwi draws the board and wires from it, and the simulator computes electrical connections from it. **One wrong character and a part does not appear or a wire does not connect.**
 
 ---
 
-## 1. 完整结构
+## 1. Full structure
 
 ```json
 {
@@ -29,131 +29,131 @@
 }
 ```
 
-### 字段含义
+### Field meanings
 
-| 字段 | 必填 | 说明 |
+| Field | Required | Meaning |
 |---|---|---|
-| `version` | ✅ | 固定 `1` |
-| `author` / `editor` | 可选 | 元信息，不影响仿真 |
-| `parts[]` | ✅ | 元件列表 |
-| `parts[].type` | ✅ | **元件类型**，必须是 Wokwi 真实存在的名字 |
-| `parts[].id` | ✅ | 元件唯一标识，连线时用它引用（`led1`） |
-| `parts[].top` / `left` | ✅ | 画布坐标（像素，可负）。只影响布局，不影响电气连接 |
-| `parts[].attrs` | 可选 | 元件属性，如 LED 颜色、电阻阻值 |
-| `parts[].rotate` | 可选 | 旋转角度（0/90/180/270） |
-| `connections[]` | ✅ | 连线列表 |
-| `connections[i]` | ✅ | `[源引脚, 目标引脚, 线色, 走线数组]` |
-| `dependencies` | 可选 | 旧版字段，留 `{}` |
+| `version` | ✅ | always `1` |
+| `author` / `editor` | optional | metadata, no effect on simulation |
+| `parts[]` | ✅ | list of parts |
+| `parts[].type` | ✅ | **part type**, must be a name that really exists in Wokwi |
+| `parts[].id` | ✅ | unique identifier, referenced by connections (`led1`) |
+| `parts[].top` / `left` | ✅ | canvas coordinates in pixels (may be negative). Layout only, no electrical meaning |
+| `parts[].attrs` | optional | part attributes such as LED colour or resistor value |
+| `parts[].rotate` | optional | rotation (0/90/180/270) |
+| `connections[]` | ✅ | list of wires |
+| `connections[i]` | ✅ | `[source pin, target pin, wire colour, path array]` |
+| `dependencies` | optional | legacy field, leave as `{}` |
 
-### connections 详解
+### connections in detail
 
 ```json
 [ "esp:2", "r1:1", "green", [] ]
 ```
 
-| 位置 | 含义 | 说明 |
+| Index | Meaning | Notes |
 |---|---|---|
-| `[0]` | 起点 | 必须是 `<id>:<pin>`，如 `esp:2`、`led1:A` |
-| `[1]` | 终点 | 同上 |
-| `[2]` | 线色 | `green`/`red`/`black`/`blue`/`gold`… **纯显示**，不影响电气 |
-| `[3]` | 走线路径 | 写 `[]` 让 Wokwi 自动布线。**初学一律写 `[]`** |
+| `[0]` | start | must be `<id>:<pin>`, e.g. `esp:2`, `led1:A` |
+| `[1]` | end | same format |
+| `[2]` | wire colour | `green`/`red`/`black`/`blue`/`gold`… **display only**, no electrical meaning |
+| `[3]` | wire path | use `[]` to let Wokwi route automatically. **Always use `[]` when starting out** |
 
-> 走线数组写错坐标只会让线画得歪，不会导致不工作；但引脚名写错会直接"连不上"且没有报错——所以**引脚名必须逐字核对**。
+> A wrong coordinate in the path array only makes the wire look crooked; a wrong pin name silently fails to connect with no error. **Verify pin names character by character.**
 
 ---
 
-## 2. 开发板 type 与引脚名
+## 2. Board types and pin names
 
-| 板子 | type | 说明 |
+| Board | type | Notes |
 |---|---|---|
-| ESP32 DevKit C（推荐） | `board-esp32-devkit-c-v4` | 38pin，最常用 |
-| ESP32-S3 DevKitC-1 | `board-esp32-s3-devkitc-1` | USB-OTG，引脚更多 |
-| Xiao ESP32-C3 | `board-xiao-esp32-c3` | 小体积 |
-| Arduino Uno | `board-uno` | 5V 逻辑 |
-| 树莓派 Pico | `board-rp-pico` | 3.3V |
+| ESP32 DevKit C (recommended) | `board-esp32-devkit-c-v4` | 38-pin, the most common |
+| ESP32-S3 DevKitC-1 | `board-esp32-s3-devkitc-1` | USB-OTG, more pins |
+| Xiao ESP32-C3 | `board-xiao-esp32-c3` | small footprint |
+| Arduino Uno | `board-uno` | 5V logic |
+| Raspberry Pi Pico | `board-rp-pico` | 3.3V |
 
-### ESP32 引脚写法
+### ESP32 pin notation
 
-两种都合法，**推荐用纯数字**：
+Both forms are legal; **plain numbers are recommended**:
 
-| 写法 | 例子 | 说明 |
+| Form | Example | Notes |
 |---|---|---|
-| 数字 | `esp:2` | GPIO2 ✅ 推荐 |
-| 带前缀 | `esp:GPIO2` | 等价 |
-| 电源 | `esp:3V3`、`esp:5V`、`esp:VIN` | |
-| 地 | `esp:GND.1`、`esp:GND.2`、`esp:GND.3` | 多个 GND 脚，任选 |
-| 串口 | `esp:TX`、`esp:RX` | 接 `$serialMonitor` |
-| 使能 | `esp:EN` | 复位脚，一般不用 |
+| number | `esp:2` | GPIO2 ✅ recommended |
+| with prefix | `esp:GPIO2` | equivalent |
+| power | `esp:3V3`, `esp:5V`, `esp:VIN` | |
+| ground | `esp:GND.1`, `esp:GND.2`, `esp:GND.3` | several GND pins, pick any |
+| serial | `esp:TX`, `esp:RX` | wire to `$serialMonitor` |
+| enable | `esp:EN` | reset pin, rarely needed |
 
-> `GND.1` 后面的数字是"第几个同名引脚"，写错会找不到脚——不确定就先用 `esp:GND.1`。
+> The number after `GND.` is "the nth pin with that name"; get it wrong and the pin is not found — when unsure, use `esp:GND.1`.
 
 ---
 
-## 3. 常用元件表
+## 3. Common parts table
 
-| 元件 | type | 引脚 | attrs 示例 |
+| Part | type | Pins | attrs example |
 |---|---|---|---|
-| LED | `wokwi-led` | `A`(阳极) `C`(阴极) | `{"color":"red"}`，可选 red/green/blue/yellow/white/orange |
+| LED | `wokwi-led` | `A` (anode), `C` (cathode) | `{"color":"red"}`, one of red/green/blue/yellow/white/orange |
 | RGB LED | `wokwi-rgb-led` | `R` `G` `B` `COM` | `{"common":"cathode"}` |
-| 电阻 | `wokwi-resistor` | `1` `2`（无方向） | `{"value":"330"}` |
-| 按键 | `wokwi-pushbutton` | `1.l` `2.l` `1.r` `2.r` | `{"color":"green"}` |
-| 拨动开关 | `wokwi-slide-switch` | `1` `2` `3` | |
-| 电位器 | `wokwi-potentiometer` | `1`(GND) `2`(信号) `3`(VCC) | `{"value":"0"}` 初始位置 |
-| 光敏模块 | `wokwi-photoresistor-sensor` | `VCC` `GND` `AO` `DO` | |
-| 蜂鸣器 | `wokwi-buzzer` | `1`(+) `2`(-) | `{"volume":"0.1"}` |
-| 舵机 | `wokwi-servo` | `GND` `VCC` `PWM` | `{"pin":"..."}` 一般不用 |
-| 直流电机 | `wokwi-dc-motor` | `1` `2` | |
-| 继电器模块 | `wokwi-relay-module` | `VCC` `GND` `IN` `NO` `NC` `COM` | |
+| Resistor | `wokwi-resistor` | `1` `2` (no polarity) | `{"value":"330"}` |
+| Button | `wokwi-pushbutton` | `1.l` `2.l` `1.r` `2.r` | `{"color":"green"}` |
+| Slide switch | `wokwi-slide-switch` | `1` `2` `3` | |
+| Potentiometer | `wokwi-potentiometer` | `1` (GND) `2` (signal) `3` (VCC) | `{"value":"0"}` initial position |
+| Photoresistor module | `wokwi-photoresistor-sensor` | `VCC` `GND` `AO` `DO` | |
+| Buzzer | `wokwi-buzzer` | `1` (+) `2` (-) | `{"volume":"0.1"}` |
+| Servo | `wokwi-servo` | `GND` `VCC` `PWM` | `{"pin":"..."}` rarely needed |
+| DC motor | `wokwi-dc-motor` | `1` `2` | |
+| Relay module | `wokwi-relay-module` | `VCC` `GND` `IN` `NO` `NC` `COM` | |
 | OLED 128×64 | `wokwi-ssd1306` | `GND` `VCC` `SDA` `SCL` | `{"i2c-address":"0x3C"}` |
 | LCD 1602 (I2C) | `wokwi-lcd1602` | `GND` `VCC` `SDA` `SCL` | `{"pins":"i2c"}` |
 | DHT22 | `wokwi-dht22` | `VCC` `SDA` `GND` | |
-| 超声波 | `wokwi-hc-sr04` | `VCC` `TRIG` `ECHO` `GND` | |
-| 红外接收 | `wokwi-ir-receiver` | `VCC` `GND` `DAT` | |
-| 红外遥控 | `wokwi-ir-remote` | 无引脚 | `{"remote":"NEC"}` |
-| 矩阵键盘 | `wokwi-membrane-keypad` | `R1..R4` `C1..C4` | |
+| Ultrasonic | `wokwi-hc-sr04` | `VCC` `TRIG` `ECHO` `GND` | |
+| IR receiver | `wokwi-ir-receiver` | `VCC` `GND` `DAT` | |
+| IR remote | `wokwi-ir-remote` | no pins | `{"remote":"NEC"}` |
+| Membrane keypad | `wokwi-membrane-keypad` | `R1..R4` `C1..C4` | |
 | microSD | `wokwi-microsd-card` | `VCC` `GND` `CS` `MOSI` `MISO` `SCK` | |
-| 逻辑分析仪 | `wokwi-logic-analyzer` | 多通道 | 调试 PWM/I2C 神器 |
-| **虚拟串口监视器** | `$serialMonitor` | `RX` `TX` | 不写进 parts，只在 connections 里用 |
+| Logic analyser | `wokwi-logic-analyzer` | multi-channel | a great tool for debugging PWM/I2C |
+| **Virtual serial monitor** | `$serialMonitor` | `RX` `TX` | not listed in parts, only used in connections |
 
 ---
 
-## 4. 五个必须记住的连接规则
+## 4. Five connection rules to remember
 
-1. **一定要接地**：任何回路都要回到 `esp:GND.x`，否则不工作。
-2. **LED 必须串电阻**：`GPIO → 电阻 → LED:A → LED:C → GND`，顺序无所谓，但电阻不能少。
-3. **串口要接线**：`esp:TX → $serialMonitor:RX`、`esp:RX → $serialMonitor:TX`，否则看不到打印。
-4. **I2C 可并联**：多个设备 SDA 接一起、SCL 接一起，靠地址区分；Wokwi **不自动加上拉**，必要时各串 2.2kΩ 到 `3V3`。
-5. **同一网络可以多点**：多个 LED 共用一个 GND 脚没问题。
-
----
-
-## 5. 布局建议（`top`/`left`）
-
-坐标只影响观感，但排得整齐，用户一眼能看懂：
-
-- 板子放 `top:-40, left:-60`；
-- 元件按信号顺序从左到右、从上到下排，间距 ≥ 60px；
-- 同类元件对齐同一列；
-- 别让元件重叠（重叠后难以点选，截图上看着也像坏了）。
+1. **Always provide ground**: every loop must return to `esp:GND.x`, otherwise nothing works.
+2. **An LED must have a series resistor**: `GPIO → resistor → LED:A → LED:C → GND`; order does not matter, the resistor does.
+3. **Serial must be wired**: `esp:TX → $serialMonitor:RX` and `esp:RX → $serialMonitor:TX`, otherwise there is no output.
+4. **I2C can be shared**: several devices tie SDA together and SCL together and are distinguished by address; Wokwi **adds no pull-ups**, so add 2.2kΩ to `3V3` when needed.
+5. **One net can have many points**: several LEDs sharing a single GND pin is fine.
 
 ---
 
-## 6. 校验方法（不跑仿真也能查错）
+## 5. Layout advice (`top`/`left`)
+
+Coordinates only affect appearance, but tidiness helps the user understand at a glance:
+
+- put the board at `top:-40, left:-60`;
+- arrange parts in signal order, left to right then top to bottom, with ≥ 60px spacing;
+- align similar parts in the same column;
+- never let parts overlap (they become hard to select and look broken in a screenshot).
+
+---
+
+## 6. How to validate (find errors without simulating)
 
 ```bash
-# JSON 语法
+# JSON syntax
 node -e "JSON.parse(require('fs').readFileSync('diagram.json','utf8')); console.log('JSON OK')"
 ```
 
-再人工核对三件事：
+Then check three things by hand:
 
-- [ ] 每个 `connections` 里的 `<id>` 都在 `parts` 里存在
-- [ ] 每个引脚名都是该元件真实有的（对照上表）
-- [ ] 至少有一条路径从 GPIO 经过元件回到 GND
+- [ ] every `<id>` used in `connections` exists in `parts`
+- [ ] every pin name really exists on that part (compare with the table above)
+- [ ] at least one path runs from a GPIO through a part back to GND
 
 ---
 
-## 7. wokwi.toml（配合 wokwi-cli 仿真）
+## 7. wokwi.toml (for wokwi-cli simulation)
 
 ```toml
 [wokwi]
@@ -161,21 +161,21 @@ version = 1
 firmware = 'build/sketch.ino.bin'
 ```
 
-- `firmware` 指向 **arduino-cli 编译产物**；文件名要跟 `.ino` 同名（`my-led.ino` → `my-led.ino.bin`）。
-- 路径相对于项目目录（`wokwi.toml` 所在目录）。
-- 注意是**单引号**，Windows 反斜杠用正斜杠或双反斜杠。
-- ESP-IDF / Pico SDK 项目可省略（CLI 能自动推断）；**ESP32 Arduino 项目不能省**。
+- `firmware` points at the **arduino-cli build output**; the filename matches the `.ino` (`my-led.ino` → `my-led.ino.bin`).
+- The path is relative to the project directory (where `wokwi.toml` lives).
+- Note the **single quotes**; on Windows use forward slashes or doubled backslashes.
+- ESP-IDF / Pico SDK projects may omit it (the CLI can infer); **ESP32 Arduino projects cannot**.
 
 ---
 
-## 8. 常见错误对照
+## 8. Common error reference
 
-| 现象 | 原因 |
+| Symptom | Cause |
 |---|---|
-| 元件不显示 | `type` 拼错（如 `wokwi-leds`）或 `parts` 里缺 `id` |
-| 线连不上、引脚发红 | 引脚名写错（`led:ANODE` 应为 `led:A`） |
-| 灯不亮但代码在跑 | 忘了接 GND，或 LED 极性反了（`A`/`C` 接反） |
-| 灯变灰 / 提示过流 | 没串电阻 |
-| 串口一片空白 | 没接 `$serialMonitor` |
-| I2C 扫描不到设备 | 没接 SDA/SCL，或地址写错，或没加上拉 |
-| 整个页面报 JSON 错 | 末尾多了逗号 / 少了括号 |
+| A part does not appear | `type` misspelled (e.g. `wokwi-leds`) or `id` missing in `parts` |
+| Wire will not connect, pin turns red | wrong pin name (`led:ANODE` should be `led:A`) |
+| Lamp stays dark but the code runs | missing GND, or LED polarity reversed (`A`/`C` swapped) |
+| Lamp turns grey / over-current warning | no series resistor |
+| Serial monitor completely blank | `$serialMonitor` not wired |
+| I2C scan finds no device | SDA/SCL not wired, wrong address, or no pull-ups |
+| Whole page reports a JSON error | trailing comma / unbalanced bracket |

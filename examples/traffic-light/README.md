@@ -1,46 +1,46 @@
-# 示例 01 · ESP32 三色红绿灯
+# Example 1 · ESP32 traffic light
 
-**中文** | [English](README.en.md)
+[中文](README.zh.md) | **English**
 
-**覆盖能力**：纯 GPIO、状态机、串口可观测性、结果查看器。零第三方库。
+**Capabilities covered**: pure GPIO, a state machine, serial observability, and the result viewer. Zero third-party libraries.
 
-## 需求
+## Request
 
-> wokwi: 用 ESP32 做一个红绿灯，绿灯 4 秒、黄灯 1 秒、红灯 4 秒
+> wokwi: build an ESP32 traffic light, green 4 seconds, yellow 1 second, red 4 seconds
 
-## 文件
+## Files
 
-| 文件 | 说明 |
+| File | What it is |
 |---|---|
-| `traffic-light.ino` | 固件：三灯轮流点亮 + 每段打日志 + 上电自检 |
-| `diagram.json` | 电路：ESP32 + 3×LED + 3×330Ω，LED 接 GPIO25/26/27 |
-| `wokwi.toml` | 指向 `build/traffic-light.ino.bin` |
-| `sim-viewer.html` | 结果查看器：三灯动画 + 真实日志回放 + 接线表 + 选型理由 |
+| `traffic-light.ino` | firmware: three lamps in turn + a log line per phase + power-on self-test |
+| `diagram.json` | circuit: ESP32 + 3×LED + 3×330Ω, LEDs on GPIO25/26/27 |
+| `wokwi.toml` | points at `build/traffic-light.ino.bin` |
+| `sim-viewer.html` | result viewer: three-lamp animation + real log replay + wiring table + selection rationale |
 
-## 怎么跑
+## How to run it
 
 ```bash
 cd examples/traffic-light
 
-# 1. 编译
+# 1. build
 powershell -File ../../scripts/compile.ps1 -Project .
 #    macOS/Linux: bash ../../scripts/compile.sh .
 
-# 2. 仿真（约 70 秒实际等待）
+# 2. simulate (about 70 seconds of real waiting)
 powershell -File ../../scripts/simulate.ps1 -Project . -Timeout 14000 -Expect "TRAFFIC"
 
-# 3. 看日志
+# 3. read the log
 cat sim-*/serial.log
 
-# 4. 看页面
-#    用浏览器打开 sim-viewer.html，或让 agent 用 present_files 弹出
+# 4. look at the page
+#    open sim-viewer.html in a browser, or have the agent open it with present_files
 ```
 
-## 预期输出
+## Expected output
 
-编译：`Sketch uses 285,664 bytes (21%)`，产物 `build/traffic-light.ino.bin`。
+Build: `Sketch uses 285,664 bytes (21%)`, artefact `build/traffic-light.ino.bin`.
 
-串口：
+Serial:
 
 ```
 =========================================
@@ -54,16 +54,16 @@ cat sim-*/serial.log
 [TRAFFIC] GREEN  ON  (4s)
 ```
 
-## 学到什么
+## What you learn here
 
-- **可观测性要写进固件**：上电自检 + 每段一行日志，无头仿真也能验收。
-- **LED 必须串电阻**：330Ω，否则仿真里灯变灰（过流）。
-- **`delay()` 不是罪**：状态简单时用阻塞延时最直观；状态复杂了再上状态机。
+- **Observability belongs in the firmware**: a power-on self-test plus one log line per phase makes headless verification possible.
+- **An LED must have a series resistor**: 330Ω, otherwise the lamp turns grey in simulation (over-current).
+- **`delay()` is not a sin**: with simple states, blocking delays are the most readable choice; bring in a state machine when the states get complicated.
 
-## 想改造它
+## Ideas to modify it
 
-- 加一个行人按钮（`wokwi-pushbutton`，GPIO4，`INPUT_PULLUP`）：按键后 5 秒内变红。
-- 换成真实交叉路口：东西向 + 南北向两套灯，加互锁逻辑。
-- 加倒计时显示：换 `wokwi-7segment` 或 OLED。
+- Add a pedestrian button (`wokwi-pushbutton`, GPIO4, `INPUT_PULLUP`): turn red within 5 seconds of a press.
+- Make a real intersection: two sets of lamps (east-west and north-south) with interlock logic.
+- Add a countdown display: switch to `wokwi-7segment` or an OLED.
 
-改完记得重跑 `compile.ps1` → `simulate.ps1` → 更新 `sim-viewer.html` 的 `CFG` 与两个原始文本块。
+After changing anything, re-run `compile.ps1` → `simulate.ps1` → update `CFG` and the two raw text blocks in `sim-viewer.html`.

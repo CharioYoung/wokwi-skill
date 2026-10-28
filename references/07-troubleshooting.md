@@ -1,94 +1,94 @@
-# 07 · 错误百科（真实踩过的坑）
+# 07 · Error encyclopaedia (traps we actually hit)
 
-**中文** | [English](07-troubleshooting.en.md)
+[中文](07-troubleshooting.zh.md) | **English**
 
-排查顺序永远是：**读第一条错误 → 判断属于哪一层 → 只改那一层**。
+The triage order is always: **read the first error → decide which layer it belongs to → change only that layer**.
 
-| 层 | 典型报错 | 去哪看 |
+| Layer | Typical errors | Where to look |
 |---|---|---|
-| 环境层 | `command not found`、下载超时、TLS 失败 | A 组 |
-| 编译层 | `error:`、`undefined reference`、`cannot find -l` | B 组 |
-| 仿真层 | 无输出、卡住、exit 42、panic | C 组 |
-| 交付层 | 页面白屏、复制后编译失败 | D 组 |
+| Environment | `command not found`, download timeouts, TLS failures | group A |
+| Build | `error:`, `undefined reference`, `cannot find -l` | group B |
+| Simulation | no output, hangs, exit 42, panic | group C |
+| Delivery | blank page, compile failure after copying | group D |
 
 ---
 
-## A. 环境层
+## A. Environment layer
 
-### A1. `基础连接已关闭，未能为 SSL/TLS 建立信任关系`
+### A1. `The underlying connection was closed: Could not establish trust relationship for the SSL/TLS secure channel`
 
-**原因**：老版 PowerShell 默认 TLS 1.0，GitHub 已拒绝。
+**Cause**: older PowerShell defaults to TLS 1.0, which GitHub now rejects.
 
-**解决**：
+**Fix**:
 ```powershell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
 ```
-或直接用 `curl.exe -L -o out.zip <url>`。
+Or just use `curl.exe -L -o out.zip <url>`.
 
-### A2. 下载 300MB 的 ESP32 核心反复超时
+### A2. The 300 MB ESP32 core download keeps timing out
 
-**原因**：`storage.googleapis.com` / GitHub 大文件在本机网络下易断。
+**Cause**: large files from `storage.googleapis.com` / GitHub tend to drop on some networks.
 
-**解决**（按成功率排序）：
-1. 重试 `arduino-cli core install esp32:esp32`；
-2. 用浏览器/IDM 手动下 zip → 本地 HTTP 服务（`http://127.0.0.1:8765/`）→ 裁剪 `package_index.json` 指向本地 → `--additional-urls` 装；
-3. 放弃本地工具链，改**生成模式**：只出 `sketch.ino` + `diagram.json`，去 wokwi.com 网页跑（云端编译，零依赖）。
+**Fix** (ordered by success rate):
+1. retry `arduino-cli core install esp32:esp32`;
+2. download the zip manually with a browser/IDM → serve it over a local HTTP server (`http://127.0.0.1:8765/`) → trim `package_index.json` so `url` points locally → install with `--additional-urls`;
+3. give up on the local toolchain and switch to **generation mode**: produce only `sketch.ino` + `diagram.json` and run them on wokwi.com (cloud compile, zero dependencies).
 
 ### A3. `parse error: expected number near offset 0 of '﻿{...'`
 
-**原因**：手写的 `installed.json` 带 UTF-8 BOM（`﻿` 不可见）。
+**Cause**: a hand-written `installed.json` carrying a UTF-8 BOM (the `﻿` is invisible).
 
-**解决**：不要手写这个文件，让 `arduino-cli` 自己生成。已写坏的，删除后重装核心。
+**Fix**: do not hand-write that file — let `arduino-cli` generate it. If it is already corrupted, delete it and reinstall the core.
 
 ### A4. `parse error: expected number near offset 34 of '3.3.9'`
 
-**原因**：手写的 `installed.json` 结构错。正确结构是 `{"packages":[...]}`，不是扁平对象。
+**Cause**: a hand-written `installed.json` with the wrong shape. The correct shape is `{"packages":[...]}`, not a flat object.
 
-**解决**：同上，交给 arduino-cli 生成，别手搓。
+**Fix**: same as above — let arduino-cli generate it.
 
-### A5. PowerShell 报 `意外的标记 }` / 中文乱码
+### A5. PowerShell reports `unexpected token }` / garbled Chinese
 
-**原因**：PowerShell 5.1 读无 BOM 的 UTF-8 `.ps1` 时按 GBK 解析，中文变乱码导致语法错。
+**Cause**: PowerShell 5.1 parses a BOM-less UTF-8 `.ps1` as GBK, so Chinese characters turn into garbage and break the syntax.
 
-**解决**：脚本**只用 ASCII**；路径含中文时用 `Join-Path $env:USERPROFILE "..."` 拼接，不要把中文写进脚本字面量。
+**Fix**: keep scripts **ASCII only**; when a path contains non-ASCII characters, build it with `Join-Path $env:USERPROFILE "..."` instead of writing the literal into the script.
 
 ### A6. `board esp32:esp32:esp32 not found`
 
-**原因**：ESP32 核心没装，或 `--config-dir` 指错目录（装在一个目录、编译时看另一个）。
+**Cause**: the ESP32 core is not installed, or `--config-dir` points at the wrong directory (installed under one, compiled against another).
 
-**解决**：
+**Fix**:
 ```bash
-arduino-cli core list                       # 确认 esp32 已安装
-arduino-cli --config-dir <同一目录> core list  # 确认编译时用的是同一个目录
+arduino-cli core list                          # confirm esp32 is installed
+arduino-cli --config-dir <same dir> core list  # confirm the build uses the same directory
 ```
 
-### A7. `file://` 的板卡索引被静默忽略
+### A7. A `file://` board index is silently ignored
 
-**原因**：arduino-cli 不接受本地文件系统索引。
+**Cause**: arduino-cli does not accept a local filesystem index.
 
-**解决**：起一个本地 HTTP 服务（Node/Python 都行），用 `http://127.0.0.1:<port>/package_index.json`。
+**Fix**: start a local HTTP server (Node or Python) and use `http://127.0.0.1:<port>/package_index.json`.
 
-### A8. 明明换了索引，`core search` 还显示线上版本
+### A8. `core search` still shows the online version after swapping the index
 
-**原因**：Arduino 官方索引 `package_index.json` 里**也包含完整 esp32 条目**，只替换自建索引不够。
+**Cause**: Arduino's official index `package_index.json` **also contains the full esp32 entries**, so replacing only the custom index is not enough.
 
-**解决**：两份索引都替换成裁剪版；或干脆放弃离线方案。
+**Fix**: replace both indexes with the trimmed versions — or drop the offline approach entirely.
 
-### A9. `Move-Item : 当文件已存在时，无法创建该文件`
+### A9. `Move-Item : Cannot create a file when that file already exists`
 
-**原因**：上次失败留下的半成品目录。
+**Cause**: a half-finished directory left over from the previous failed attempt.
 
-**解决**：解包前先 `Remove-Item -Recurse -Force <目标目录>`。
+**Fix**: `Remove-Item -Recurse -Force <target>` before unpacking.
 
 ---
 
-## B. 编译层
+## B. Build layer
 
 ### B1. `'selfTest' was not declared in this scope`
 
-**原因**：代码被"精简展示"过，调用了函数但把定义删了。
+**Cause**: the code was "simplified for display" — a function is called but its definition was removed.
 
-**解决**：用**真正编译通过的原文**。凡是给用户复制的内容，必须先在本机编译一次。
+**Fix**: use the **verbatim source that really compiled**. Anything you hand to the user for copying must be compiled once on this machine first.
 
 ### B2. `missing terminating ' character`
 
@@ -98,45 +98,45 @@ error: missing terminating ' character
 105 | ');
 ```
 
-**原因**：C 代码被放进了 JS 模板字符串，`\n` 被 JS 解释成真换行。
+**Cause**: C code was placed inside a JS template literal and `\n` was interpreted by JS as a real newline.
 
-**解决**：改用 `<script type="text/plain" id="inoSrc">` 原始文本块 + `rawSrc()`。详见 `06-viewer.md` 铁律 2。
+**Fix**: switch to a `<script type="text/plain" id="inoSrc">` raw block plus `rawSrc()`. See hard rule 2 in `06-viewer.md`.
 
-### B3. `Error during build: exit status 1`（在 wokwi.com 网页端）
+### B3. `Error during build: exit status 1` (on the wokwi.com web editor)
 
-**原因**：常见三种——板子没选对、用了第三方库但没建 `libraries.txt`、工程里有多个 `.ino`。
+**Cause**: three usual suspects — wrong board selected, a third-party library used without a `libraries.txt`, or more than one `.ino` in the project.
 
-**解决**：
-- 确认板子是 ESP32 DevKit C；
-- 需要库的，新建 `libraries.txt` 写库名（每行一个）；
-- **只保留一个 `.ino`**。
+**Fix**:
+- make sure the board is ESP32 DevKit C;
+- if a library is needed, create `libraries.txt` with one name per line;
+- **keep exactly one `.ino`**.
 
-### B4. 双 `.ino` 重复定义
+### B4. Duplicate definitions from two `.ino` files
 
 ```
 error: redefinition of 'void setup()'
 ```
 
-**原因**：Wokwi/Arduino 会把工程目录下所有 `.ino` 拼起来编译。
+**Cause**: Wokwi/Arduino concatenates every `.ino` in the project directory before compiling.
 
-**解决**：删掉多余的，只留一个（通常是 `sketch.ino`）。
+**Fix**: delete the extra one and keep a single file (usually `sketch.ino`).
 
 ### B5. `ld.exe: cannot open output file ... .elf` / `cannot find -l<lib>`
 
-**原因**：**构建路径含中文**（如 `C:\Users\杨灿\...`），`ld.exe` 无法处理。
+**Cause**: **the build path contains non-ASCII characters** (e.g. `C:\Users\<non-ascii>\...`), which `ld.exe` cannot handle.
 
-**解决**：构建目录换纯 ASCII：
+**Fix**: move the build directory to a pure ASCII path:
 ```powershell
 arduino-cli --config-dir C:\wokwi-toolchain\data compile `
-  --fqbn esp32:esp32:esp32 --build-path C:\wokwi-toolchain\build <项目>
+  --fqbn esp32:esp32:esp32 --build-path C:\wokwi-toolchain\build <project>
 ```
-`scripts/compile.ps1` 已默认如此。
+`scripts/compile.ps1` already does this by default.
 
-### B6. `Sketch too big` / 程序空间不足
+### B6. `Sketch too big` / program space exhausted
 
-**原因**：ESP32 默认分区只有 1.3MB 给程序。
+**Cause**: the default ESP32 partition table only gives 1.3 MB to the program.
 
-**解决**：减少功能/库；或换 `--fqbn esp32:esp32:esp32:default` 之外的更大分区方案。
+**Fix**: trim features/libraries, or pick a larger partition scheme than `--fqbn esp32:esp32:esp32:default`.
 
 ### B7. `Can't open sketch: main file missing from sketch: ...\my-project.ino`
 
@@ -145,106 +145,106 @@ arduino-cli.exe : Can't open sketch: main file missing from sketch:
                   D:\repo\my-project\blink.ino
 ```
 
-**原因**：arduino-cli 要求 **sketch 目录名必须与 `.ino` 文件名相同**。目录叫 `my-project`，里面放 `blink.ino`，它就会去找 `my-project.ino`——找不到。
+**Cause**: arduino-cli requires **the sketch directory name to equal the `.ino` filename**. The directory is `my-project` but contains `blink.ino`, so it looks for `my-project.ino` — which does not exist.
 
-**解决**（二选一）：
+**Fix** (either one):
 
 ```bash
-# 方案 A：让文件名跟目录名一致（推荐）
+# option A: make the filename match the directory (recommended)
 mv my-project/blink.ino my-project/my-project.ino
 
-# 方案 B：让目录名跟文件名一致
+# option B: make the directory match the filename
 mv my-project blink
 ```
 
-**预防**：建工程时就让目录名 = `.ino` 文件名，例如 `wokwi-projects/remote-switch/remote-switch.ino`。`scripts/compile.ps1` 会在编译前检查这一点并直接给出提示。
+**Prevention**: name the directory after the `.ino` from the start, e.g. `wokwi-projects/remote-switch/remote-switch.ino`. `scripts/compile.ps1` checks this before building and tells you directly.
 
-> 这条同样适用于 Wokwi 网页端：工程里的主文件叫 `sketch.ino`，所以**别把主文件重命名成别的**，否则可能编译不到入口。
+> The same applies on the Wokwi web editor: the main file is called `sketch.ino`, so **do not rename the main file**, or the entry point may not be compiled.
 
 ---
 
-## C. 仿真层
+## C. Simulation layer
 
 ### C1. exit code 42
 
-**结论**：**正常**。表示到达 `--timeout` 被终止。持续运行的程序必然如此。
+**Verdict**: **normal**. It means the run was stopped at `--timeout`. Any continuously running program ends this way.
 
-**判据**：日志里有目标行即通过。别拿退出码当验收标准。
+**Criterion**: passing means the target lines are in the log. Do not use the exit code as the acceptance criterion.
 
-### C2. 仿真"卡住"很久没反应
+### C2. The simulation "hangs" for a long time
 
-**三种可能**，按顺序排查：
+**Three possibilities**, in order:
 
-1. **只是慢**：本机仿真约 1.5–5 倍慢，16000 仿真毫秒 ≈ 80 秒真实等待。先等够时间。
-2. **MCP 队列堵了**：上次 `start_simulation` 被中断，残留请求占着队列。重启客户端，或改用 `scripts/simulate.ps1`（CLI 直连）。
-3. **网络问题**：`curl -I https://wokwi.com` 看是否 200。之前有过误判——HTTP/WebSocket 都正常，纯粹是慢+堵。
+1. **It is just slow**: local simulation is about 1.5–5× slower, so 16000 simulated ms ≈ 80 s of real waiting. Wait long enough first.
+2. **The MCP queue is blocked**: the previous `start_simulation` was interrupted and a leftover request still occupies the queue. Restart the client, or use `scripts/simulate.ps1` (direct CLI).
+3. **Network problem**: check `curl -I https://wokwi.com` for 200. There has been a misdiagnosis before — HTTP and WebSocket were both fine, it was purely slow plus blocked.
 
-### C3. 串口一片空白
+### C3. The serial output is completely blank
 
-- `diagram.json` 没把 `esp:TX/RX` 接到 `$serialMonitor`；
-- 代码里没有 `Serial.begin(115200)`；
-- 波特率不匹配。
+- `diagram.json` does not connect `esp:TX/RX` to `$serialMonitor`;
+- the code has no `Serial.begin(115200)`;
+- the baud rates do not match.
 
-### C4. 代码在跑但 LED 不亮
+### C4. The code runs but the LED stays dark
 
-- 忘了接 GND（最常见）；
-- LED 极性接反（`A` 阳极 → 电阻 → GPIO，`C` 阴极 → GND）；
-- 引脚号写错（`esp:2` vs 代码里的 `LED=4`）；
-- 没串电阻导致过流，仿真里灯变灰。
+- missing GND (most common);
+- LED polarity reversed (`A` anode → resistor → GPIO, `C` cathode → GND);
+- wrong pin number (`esp:2` vs `LED=4` in the code);
+- no series resistor causing over-current, so the lamp turns grey in simulation.
 
-### C5. WiFi 连不上 / 一直 `connecting...`
+### C5. WiFi will not connect / stuck on `connecting...`
 
-- Wokwi 虚拟网络 SSID 用 `"Wokwi-GUEST"`（无密码）；
-- 首次连接比真机慢，要留 5–15 秒；
-- 代码里加超时重试，不要在 `while(WiFi.status()!=WL_CONNECTED)` 里死等。
+- the Wokwi virtual network SSID is `"Wokwi-GUEST"` (no password);
+- the first connection is slower than real hardware; allow 5–15 seconds;
+- add a timeout and retry in the code; never spin forever in `while(WiFi.status()!=WL_CONNECTED)`.
 
 ### C6. `Guru Meditation Error` / panic
 
-- 数组越界 / 空指针；
-- 用了 GPIO 6–11（接 Flash）；
-- 在中断里做了耗时操作。
+- array out of bounds / null pointer;
+- GPIO 6–11 used (they are wired to flash);
+- a long operation performed inside an interrupt.
 
-看日志第一行 backtrace，结合最近改的代码定位。
+Read the backtrace on the first log line and correlate it with your most recent change.
 
-### C7. 想截个图看效果，结果是 0 字节或 16×16
+### C7. You wanted a screenshot but got 0 bytes or 16×16
 
-**结论**：`--screenshot-part` 只对**有 framebuffer 的元件**（OLED/LCD）有效。LED 只有 16×16 缩略图；不设 part 时整屏常为 0 字节。
+**Verdict**: `--screenshot-part` only works on **parts with a framebuffer** (OLED/LCD). An LED yields a 16×16 thumbnail; without a part the full-canvas image is often 0 bytes.
 
-**解决**：想看画面就用 `sim-viewer.html`（本地回放）；想看真实屏幕就用 OLED 项目。
+**Fix**: to see the picture, use `sim-viewer.html` (local replay); to see a real screen, use an OLED project.
 
 ---
 
-## D. 交付层（查看器）
+## D. Delivery layer (the viewer)
 
-### D1. 打开全白，控制台 `CFG is not defined`
+### D1. Opens completely blank, console says `CFG is not defined`
 
-**原因**：改造页面时用了 `slice(0, lastIndexOf('<script>'))` 之类的前缀截断，把 `CFG` 等定义整段删掉。
+**Cause**: editing used a prefix truncation such as `slice(0, lastIndexOf('<script>'))`, which deleted definitions like `CFG` wholesale.
 
-**解决**：补回定义；以后只替换目标区间，并跑 `node scripts/domrun.js` 验证。
+**Fix**: restore the definition; from now on replace only the target range, and verify with `node scripts/domrun.js`.
 
-### D2. 灯不显示 / 点了没反应
+### D2. A lamp does not render / clicking does nothing
 
-- `CFG.actors[].id` 与 `diagram.json` 的元件 `id` 不一致；
-- `boot()` 没被调用（文件末尾少了 `boot();`）；
-- JS 报错导致后续代码没执行——用 `domrun.js` 看错误数。
+- `CFG.actors[].id` does not match the part `id` in `diagram.json`;
+- `boot()` was never called (the trailing `boot();` is missing);
+- a JS error stopped the rest of the script — check the error count with `domrun.js`.
 
-### D3. 复制出来的代码在 Wokwi 报错
+### D3. The copied code fails in Wokwi
 
-- 报 `'xxx' was not declared` → 用了精简版（铁律 1）；
-- 报 `missing terminating ' character` → 用了 JS 模板字符串（铁律 2）；
-- 报重复定义 → 工程里有多个 `.ino`。
+- `'xxx' was not declared` → a simplified version was used (hard rule 1);
+- `missing terminating ' character` → a JS template literal was used (hard rule 2);
+- duplicate definitions → more than one `.ino` in the project.
 
-### D4. `verify_viewer.js` 说 `INO match real file: false`
+### D4. `verify_viewer.js` says the INO does not match the real file
 
-**原因**：页面里的代码和项目里的 `.ino` 已经不同步（改了一边忘了另一边）。
+**Cause**: the code on the page and the project's `.ino` have drifted apart (one side changed, the other forgotten).
 
-**解决**：以**编译通过的那份**为准，重新贴进 `inoSrc` 块，再跑一次校验。
+**Fix**: take **the version that compiles** as the source of truth, paste it into the `inoSrc` block again, and re-run the check.
 
-### D5. `domrun.js` 报 `requestAnimationFrame is not defined`
+### D5. `domrun.js` reports `requestAnimationFrame is not defined`
 
-**原因**：测试桩没实现这个 API（有的查看器用 rAF 做动画）。
+**Cause**: the test stub does not implement the API (some viewers animate with rAF).
 
-**解决**：这是**脚本**的问题，不是页面的问题。在 `domrun.js` 的 sandbox 里补：
+**Fix**: this is a **script** problem, not a page problem. Add to the sandbox in `domrun.js`:
 ```js
 requestAnimationFrame: (fn) => setTimeout(() => fn(Date.now()), 0),
 cancelAnimationFrame: (id) => clearTimeout(id),
@@ -252,12 +252,12 @@ cancelAnimationFrame: (id) => clearTimeout(id),
 
 ---
 
-## E. 一条通用建议
+## E. One general piece of advice
 
-遇到没见过的错，别急着改代码，先做三件事：
+When you hit an unfamiliar error, do not rush to edit code. Do three things first:
 
-1. 把**完整报错**（含文件名、行号、上下文）贴出来，不要只贴最后一行；
-2. 确认**哪一层**出的问题（编译？仿真？页面？）；
-3. 用最小可复现工程验证假设——把项目砍到只剩一个 LED 和一个 `println`。
+1. paste the **complete error** (filename, line number, context) — not just the last line;
+2. decide **which layer** it belongs to (build? simulation? page?);
+3. validate the hypothesis with a minimal reproduction — cut the project down to one LED and one `println`.
 
-大部分"玄学问题"，砍到最小就现形了。
+Most "mysterious" problems reveal themselves once cut down to the minimum.

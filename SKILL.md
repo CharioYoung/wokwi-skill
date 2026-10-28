@@ -10,19 +10,19 @@ metadata:
 
 # Wokwi Builder
 
-**中文** | [English](SKILL.en.md)
+[中文](SKILL.zh.md) | **English**
 
-把一句自然语言需求变成**真的在 Wokwi 里跑起来**的电路工程，并把运行结果以可交互页面交付。
+Turn one sentence of natural language into a circuit project that **actually runs in Wokwi**, and deliver the result as an interactive page.
 
-适用对象包括**完全不懂硬件的人**：用户不需要知道 GPIO、电阻、PWM，你负责全部翻译。
+The target audience includes **people with no hardware background at all**: the user should not need to know what GPIO, resistors or PWM are — you do the translation.
 
-> 下文所有 `scripts/`、`references/`、`assets/` 路径都**相对于本 skill 目录**（安装后位于 `~/.workbuddy/skills/wokwi-builder/` 或 `~/.claude/skills/wokwi-builder/`）。执行时请拼成绝对路径。
+> Every `scripts/`, `references/` and `assets/` path below is **relative to this skill directory** (after installation: `~/.workbuddy/skills/wokwi-builder/` or `~/.claude/skills/wokwi-builder/`). Resolve them to absolute paths when you execute.
 
 ---
 
-## 0. 先自检环境（每个新会话/新机器只做一次）
+## 0. Check the environment first (once per new session / new machine)
 
-不要凭记忆假设工具存在，先跑：
+Never assume the tools exist from memory. Run:
 
 ```bash
 # Windows
@@ -31,151 +31,153 @@ powershell -ExecutionPolicy Bypass -File scripts/check-env.ps1
 bash scripts/check-env.sh
 ```
 
-- 任何一项 `FAIL` → 按 `references/02-environment.md` 逐步安装，**装完再动手**。
-- 全都 `PASS` 才开始接需求。
-- 若本机没有任何工具，也**可以先只产出文件**（`sketch.ino` + `diagram.json`），让用户去 wokwi.com 网页粘贴运行——这是零依赖降级路径。
+- Any `FAIL` → install step by step following `references/02-environment.md`, and **finish installing before doing anything else**.
+- Start taking requirements only when everything is `PASS`.
+- If the machine has no tools at all, you can still **produce files only** (`sketch.ino` + `diagram.json`) and let the user paste them into the wokwi.com web editor — that is the zero-dependency fallback path.
 
 ---
 
-## 1. 需求解析与选型
+## 1. Parse the requirement and select parts
 
-拿到需求先做三件事，然后**直接给合理默认值往下走**，不要连环追问：
+Do three things, then **pick sensible defaults and move on** — do not interrogate the user with a chain of questions:
 
-1. **拆功能**：输入（传感器/按钮/网络）、处理（逻辑/状态机）、输出（LED/屏幕/舵机/继电器）。
-2. **选板**：`references/03-hardware-selection.md` 的决策树。默认 **ESP32 DevKit C**（`board-esp32-devkit-c-v4`）。
-3. **对表**：确认每个器件在 Wokwi 里**有模型**（`references/04-diagram-schema.md` 的元件表）。没有模型就走降级策略（等效替代 / 信号注入 / 标为"仿真外"），并**如实告知用户**。
+1. **Break down the function**: input (sensor / button / network), processing (logic / state machine), output (LED / display / servo / relay).
+2. **Pick a board**: decision tree in `references/03-hardware-selection.md`. Default is **ESP32 DevKit C** (`board-esp32-devkit-c-v4`).
+3. **Check the table**: confirm every part **has a model** in Wokwi (part table in `references/04-diagram-schema.md`). If a model does not exist, take the fallback path (equivalent substitute / signal injection / mark as "out of simulation scope") and **tell the user honestly**.
 
-选型结论必须能写成"需求点 → 选型 → 理由"三列，最后放进查看器（`CFG.selection`），让用户看得见你为什么这么选。
+The selection result must be expressible as three columns — "requirement → choice → reason" — and end up in the viewer (`CFG.selection`) so the user can see why you chose it.
 
 ---
 
-## 2. 产出工程文件
+## 2. Produce the project files
 
-在 `<workspace>/wokwi-projects/<项目名>/` 下生成：
+Generate under `<workspace>/wokwi-projects/<project-name>/`:
 
-| 文件 | 作用 | 要点 |
+| File | Purpose | Key points |
 |---|---|---|
-| `sketch.ino` | Arduino C++ 固件 | ESP32 逻辑电平 3.3V；GPIO 编号不是物理脚序 |
-| `diagram.json` | 电路拓扑 | **写之前必读** `references/04-diagram-schema.md`；LED 必须串 220–330Ω |
-| `wokwi.toml` | 告诉 wokwi-cli 固件在哪 | `firmware = 'build/sketch.ino.bin'` |
-| `libraries.txt` | 第三方库（可选） | 每行一个，如 `Adafruit SSD1306` |
-| `sim-viewer.html` | 结果查看器（第 5 步生成） | 由 `assets/viewer-template.html` 改造 |
+| `sketch.ino` | Arduino C++ firmware | ESP32 logic level is 3.3V; GPIO numbers are not physical pin order |
+| `diagram.json` | Circuit topology | **Read** `references/04-diagram-schema.md` **before writing**; an LED must have a 220–330Ω series resistor |
+| `wokwi.toml` | Tells wokwi-cli where the firmware is | `firmware = 'build/sketch.ino.bin'` |
+| `libraries.txt` | Third-party libraries (optional) | One per line, e.g. `Adafruit SSD1306` |
+| `sim-viewer.html` | Result viewer (produced in step 5) | Derived from `assets/viewer-template.html` |
 
-**固件里必须自带可观测性**——这是无头仿真的唯一"眼睛"：
+**The firmware must carry its own observability** — that is the only "eye" you have in a headless simulation:
 
-- `Serial.begin(115200)` + 关键节点 `println`（启动、自检、IP、状态、周期上报）。
-- 上电自检（LED 呼吸 2 次 / 三灯轮流亮），让"有没有跑起来"肉眼/日志都能判定。
-- 网络类项目：打印 `WiFi.localIP()`，并做超时重试。
-- 状态类项目：每 1–2 秒打印一行状态（`[STATUS] tick | mode=BREATHE | duty=207`）。
+- `Serial.begin(115200)` plus `println` at key points (boot, self-test, IP, status, periodic reports).
+- A power-on self-test (LED breathes twice / three lamps light in turn) so "did it start" is decidable by eye and by log.
+- Network projects: print `WiFi.localIP()` and implement timeout plus retry.
+- Stateful projects: print one status line every 1–2 seconds (`[STATUS] tick | mode=BREATHE | duty=207`).
 
 ---
 
-## 3. 本地编译（ESP32 Arduino 必须走这步）
+## 3. Build locally (mandatory for ESP32 Arduino)
 
-**硬事实：wokwi-cli 不会帮你编译 ESP32 Arduino 代码，必须自己给固件。**（ESP-IDF / Pico SDK 可自动推断，Arduino 不行。）
+**Hard fact: wokwi-cli will not compile ESP32 Arduino code for you — you must supply the firmware.** (ESP-IDF / Pico SDK can be inferred automatically; Arduino cannot.)
 
 ```bash
 # Windows
-powershell -ExecutionPolicy Bypass -File scripts/compile.ps1 -Project <项目目录>
+powershell -ExecutionPolicy Bypass -File scripts/compile.ps1 -Project <project-dir>
 # macOS / Linux
-bash scripts/compile.sh <项目目录>
+bash scripts/compile.sh <project-dir>
 ```
 
-- 成功判据：`build/<name>.ino.bin` 存在且体积合理（ESP32 简单项目 200KB~1MB）。
-- **构建目录必须是纯 ASCII 路径**：`ld.exe` 处理中文路径会失败（`cannot open output file ... .elf`）。脚本默认用 `C:/wokwi-toolchain/build`。
-- 编译通过之前不要浪费仿真次数。
+- Success criterion: `build/<name>.ino.bin` exists and its size is plausible (200 KB–1 MB for a simple ESP32 project).
+- **The build directory must be a pure ASCII path**: `ld.exe` fails on non-ASCII paths (`cannot open output file ... .elf`). The scripts default to `C:/wokwi-toolchain/build`.
+- Do not waste simulation runs before the build passes.
 
 ---
 
-## 4. 跑仿真 + 回收证据
+## 4. Run the simulation and collect evidence
 
 ```bash
-powershell -ExecutionPolicy Bypass -File scripts/simulate.ps1 -Project <项目目录> -Timeout 16000 -Expect "IP:","[HTTP] server started"
+powershell -ExecutionPolicy Bypass -File scripts/simulate.ps1 -Project <project-dir> -Timeout 16000 -Expect "IP:","[HTTP] server started"
 ```
 
-或用已配置的 Wokwi MCP（`start_simulation` / `get_serial_output`）。参数与坑见 `references/05-build-and-simulate.md`，重点是四条：
+Or use the configured Wokwi MCP (`start_simulation` / `get_serial_output`). Flags and traps are in `references/05-build-and-simulate.md`; the four that matter:
 
-| 事实 | 含义 |
+| Fact | Meaning |
 |---|---|
-| `--timeout` 单位是**仿真毫秒** | 不是墙钟时间 |
-| 本地仿真比真实时间慢 **1.5–5 倍**（视项目而定） | 16000 仿真毫秒可能要等 25–80 秒 |
-| 持续运行的项目会以 **exit 42** 结束 | 属正常，只要日志里有目标行即通过 |
-| `--screenshot-part` 只对有 framebuffer 的元件有效 | LED 只有 16×16 缩略图；整屏不设 part 常常 0 字节 |
+| `--timeout` is in **simulated milliseconds** | not wall-clock time |
+| Local simulation is **1.5–5× slower** than real time (project dependent) | 16000 simulated ms may take 25–80 s |
+| Continuously running projects end with **exit 42** | that is normal; passing means the target lines are in the log |
+| `--screenshot-part` only works on parts with a framebuffer | an LED gives a 16×16 thumbnail; a full-canvas shot with no part is often 0 bytes |
 
-所以验收标准永远是**串口日志里的断言**，不是"看起来跑过了"。
+So the acceptance criterion is always **an assertion on the serial log**, never "it looked like it ran".
 
 ---
 
-## 5. 生成可交互结果查看器（交付重点）
+## 5. Generate the interactive result viewer (the real deliverable)
 
-wokwi-cli 无头、不建网页工程、截不到全景。让用户"看到并操作"的最稳方案是本地查看器：
+wokwi-cli is headless, does not create web projects, and cannot capture the whole canvas. The most reliable way to let the user "see and operate" it is a local viewer:
 
-1. 复制 `assets/viewer-template.html` → `<项目目录>/sim-viewer.html`。
-2. 按 `references/06-viewer.md` 改 `CFG`（actors / sequence / selection / rawLog）。
-3. **两个原始文本块不要手抄**，用工具写：
+1. Copy `assets/viewer-template.html` → `<project-dir>/sim-viewer.html`.
+2. Edit `CFG` (actors / sequence / selection / rawLog) following `references/06-viewer.md`.
+3. **Do not paste the two raw text blocks by hand** — let the tool write them:
    ```bash
-   node scripts/sync_embed.js <项目目录>      # 真实 .ino / diagram.json → 页面的 text/plain 块
+   node scripts/sync_embed.js <project-dir>     # real .ino / diagram.json -> the page's text/plain blocks
    ```
-4. **电路图禁止手绘，只能渲染**：页面里的 PCB-VIEW 块直接解析 `diagram.json` 渲染真实板卡/引脚/连线，支持 LED 亮度驱动、点灯切换、悬停看连线。要改渲染器只改 `scripts/pcbview.js`，再 `node scripts/sync_pcbview.js` 同步。
+4. **Never draw the circuit - render it**: the PCB-VIEW block parses `diagram.json` and renders the real board, pins and wires, with LED brightness driven by page state, click-to-switch, and hover-to-identify wires. To change the renderer, edit `scripts/pcbview.js` and run `node scripts/sync_pcbview.js`.
 
-   > 画一只鸭子、一个灰盒子、三颗灯泡都不算电路 —— 读者看不到哪个引脚连到哪，而且手绘图会**掩盖坏掉的 `diagram.json`**（引脚名写错时渲染器会跳过那条线，手绘图照样画得漂亮）。`verify_viewer.js` 会在页面找不到 `PcbView.render(` 时直接失败。
-5. **必须做三重校验**：
+   > A duck, a grey box or three bulbs is not a circuit: the reader cannot see which pin goes where, and a drawing **hides a broken `diagram.json`** (a wrong pin name makes the renderer skip that wire; a drawing shows it anyway). `verify_viewer.js` fails when the page never calls `PcbView.render(`.
+5. **Three checks are mandatory**:
    ```bash
-   node scripts/verify_viewer.js <项目目录>     # 代码与真实文件逐字节一致 + JS 语法
-   node scripts/domrun.js <项目目录>/sim-viewer.html   # 假 DOM 真跑 boot()，错误数必须为 0
-   node scripts/check_circuit.js <项目目录>    # 几何 + 引脚 + 标注：crossings 0、UNRESOLVED 0、labels 齐全、shared ≤ 1%
+   node scripts/verify_viewer.js <project-dir>              # code byte-identical to the real files + JS syntax
+   node scripts/domrun.js <project-dir>/sim-viewer.html     # fake DOM really runs boot(); error count must be 0
+   node scripts/check_circuit.js <project-dir>              # geometry + pins + labels: crossings 0, UNRESOLVED 0, labels complete, shared <= 1%
    ```
-6. 用 `present_files` 弹出预览。
+6. Open the preview with `present_files`.
 
-**查看器六条铁律（血泪换来的，违反必炸）**：
+**Six hard rules for the viewer (each learned the hard way — break one and it explodes)**:
 
-1. 页面里的 `.ino` / `diagram.json` 必须是**实际编译通过的原文**，函数/宏/全局变量一个都不能删。
-2. **绝不能用 JS 模板字符串承载 C/C++ 代码**（`\n` 会被 JS 解释成真换行，用户复制后 Wokwi 报 `missing terminating ' character`）。必须用 `<script type="text/plain" id="inoSrc">` 原始文本块。
-3. 校验必须**模拟浏览器取值**（按 `rawSrc()` 归一化后比对），直接读 HTML 原文会假阳性。
-4. 改已有页面只能替换**目标区间**，不要用 `slice(0, lastIndexOf('<script>'))` 这类截断写法——会连带删掉 `CFG` 等定义，页面白屏且语法检查查不出来。
-5. **电路图只能由 `PcbView.render(diagram)` 生成**。串口跑通不代表接线对：固件不检查硬件，`digitalWrite` 打在没接灯的脚上照样返回。`check_circuit.js` 的 `UNRESOLVED` 才是接线对不对的唯一证据。
-6. **图上必须能读出"这是什么、哪只脚"，且两根不相干的线不许压在一起**。非主器件要印 `id` + 精确型号 + 每个引脚名；`check_circuit.js` 的 `labels=` 必须等于 `diagram.json` 的声明值、`shared=` 必须 ≤ 1%（`bus=` 是同引脚汇合，只报告）。
+1. The `.ino` / `diagram.json` on the page must be the **verbatim source that actually compiled**; not a single function, macro or global may be removed.
+2. **Never carry C/C++ code inside a JS template literal** (`\n` becomes a real newline in JS, and after the user copies it Wokwi reports `missing terminating ' character`). Use a `<script type="text/plain" id="inoSrc">` raw text block instead.
+3. Verification must **simulate how the browser reads the value** (normalise exactly like `rawSrc()` and compare); reading the HTML source directly gives false positives.
+4. When editing an existing page, replace only **the target range** — do not use truncation like `slice(0, lastIndexOf('<script>'))`, which also deletes definitions such as `CFG`, leaving a blank page that no syntax check will catch.
+5. **The circuit must come from `PcbView.render(diagram)`.** A working serial log does not prove the wiring: firmware never checks hardware, and `digitalWrite` to an unconnected pin returns happily. `UNRESOLVED` in `check_circuit.js` is the only evidence that it is wired right.
+6. **The picture must say what each part is and which leg is which, and two unrelated wires may never share a line.** Every non-board part prints its `id` + exact type + every pin name; `labels=` in `check_circuit.js` must equal what `diagram.json` declares and `shared=` must stay at or under 1% (`bus=` is a junction out of one pin — reported only).
 
-细节与反例见 `references/06-viewer.md`。
-
----
-
-## 6. 交付与迭代
-
-给用户三样东西：
-
-1. **能看的**：`present_files` 打开的 `sim-viewer.html`（真实日志 + 动画 + 可点按钮 + 电路连接表 + 选型理由）。
-2. **能复现的**：项目目录里的 `.ino` / `diagram.json`，以及"如何在 wokwi.com 粘贴运行"的两步说明。
-3. **能改的**：一句话说清"要改哪里就告诉我哪个现象"。
-
-用户不满意时，按 `选型 → 接线 → 代码 → 重新编译 → 重新仿真 → 更新查看器` 顺序迭代，不要只改画面不改真代码。
+Details and counter-examples are in `references/06-viewer.md`.
 
 ---
 
-## 关键约束（写代码/接线时逐条对照）
+## 6. Deliver and iterate
 
-- ESP32 逻辑电平 **3.3V**，GPIO 编号 ≠ 物理脚序（`esp:2` 是 GPIO2）。
-- 输入脚必须 `INPUT_PULLUP`/`INPUT_PULLDOWN`，**不要悬空**。
-- I2C 在 Wokwi 不自动加上拉，必要时 SDA/SCL 各串 2.2kΩ 到 3V3。
-- 网络仿真走虚拟网关，首次连接比真机慢，代码要有超时与重试，长任务里 `yield()`。
-- 一个工程里**只能有一个 `.ino`**（双 `.ino` 会重复定义）。
-- **绝不把 Wokwi token 写进任何生成文件、日志或回复**。
-- 不要尝试用浏览器自动化驱动 wokwi.com 建工程（实测会被网络策略拦截，且 CLI 无建工程 API）。
+Give the user three things:
+
+1. **Something to look at**: the `sim-viewer.html` opened by `present_files` (real log + animation + clickable buttons + circuit connection table + selection rationale).
+2. **Something to reproduce**: the `.ino` / `diagram.json` in the project directory, plus two-step instructions for pasting them into wokwi.com.
+3. **Something to change**: one sentence saying "tell me which symptom you want different and I'll change it".
+
+When the user is unhappy, iterate in this order — `selection → wiring → code → rebuild → re-simulate → update viewer` — never change only the picture without changing the real code.
 
 ---
 
-## 参考文档索引
+## Key constraints (check each line while writing code or wiring)
 
-| 文档 | 什么时候读 |
+- ESP32 logic level is **3.3V**; GPIO numbers ≠ physical pin order (`esp:2` is GPIO2).
+- Input pins must be `INPUT_PULLUP` / `INPUT_PULLDOWN`, **never floating**.
+- Wokwi does not add I2C pull-ups automatically; add 2.2 kΩ from SDA/SCL to 3V3 when needed.
+- Network simulation goes through a virtual gateway and the first connection is slower than real hardware; add timeouts and retries, and call `yield()` inside long tasks.
+- **Only one `.ino` per project** (two `.ino` files cause duplicate definitions).
+- **Never write the Wokwi token into any generated file, log or reply.**
+- Do not try to drive wokwi.com with browser automation to create a project (in practice it gets blocked by network policy, and the CLI has no project-creation API anyway).
+
+---
+
+## Reference index
+
+| Document | When to read it |
 |---|---|
-| `references/00-quickstart.md` | 第一次用，想 10 分钟跑通一遍 |
-| `references/01-wokwi-primer.md` | 用户和你自己需要补齐"Wokwi/开发板/电路"零基础概念 |
-| `references/02-environment.md` | 装 wokwi-cli / token / MCP / arduino-cli / ESP32 核心 |
-| `references/03-hardware-selection.md` | 决定用什么板子、什么元件、Wokwi 有没有模型 |
-| `references/04-diagram-schema.md` | **写 `diagram.json` 之前必读** |
-| `references/05-build-and-simulate.md` | 编译失败、仿真参数、观测手段 |
-| `references/06-viewer.md` | 生成/修改 `sim-viewer.html` |
-| `references/07-troubleshooting.md` | 任何报错先查这里 |
-| `references/08-examples.md` | 想看三个跑通的完整案例 |
+| `references/00-quickstart.md` | First time, want a run through in 10 minutes |
+| `references/01-wokwi-primer.md` | The user or you need the "Wokwi / boards / circuits" basics |
+| `references/02-environment.md` | Installing wokwi-cli / token / MCP / arduino-cli / ESP32 core |
+| `references/03-hardware-selection.md` | Deciding the board, the parts, and whether Wokwi has a model |
+| `references/04-diagram-schema.md` | **Mandatory before writing `diagram.json`** |
+| `references/05-build-and-simulate.md` | Build failures, simulation flags, ways to observe |
+| `references/06-viewer.md` | Generating or editing `sim-viewer.html` |
+| `references/07-troubleshooting.md` | First place to look for any error |
+| `references/08-examples.md` | Want to see the three complete worked examples |
 
-现成可跑工程：`examples/traffic-light/`（纯 GPIO 状态机）、`examples/remote-switch/`（WiFi + HTTP + PWM）、`examples/servo-ring/`（Mega + 32 舵机 + 98 条线，复杂工程压测）、`examples/duck-robot/`（LED/舵机/蜂鸣器/超声波 4 类外设协同 + scenario 注入）。
+Runnable projects included: `examples/traffic-light/` (pure GPIO state machine), `examples/remote-switch/` (WiFi + HTTP + PWM), `examples/servo-ring/` (Mega + 32 servos + 98 wires, a complex-project stress test), `examples/duck-robot/` (LED/servo/buzzer/ultrasonic together, plus scenario injection).
+
+> Every reference also exists in English with the `.md` suffix, e.g. `references/06-viewer.md`.
