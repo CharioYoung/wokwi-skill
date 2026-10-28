@@ -11,12 +11,18 @@
 #   ./simulate.sh examples/01-traffic-light 14000 "TRAFFIC"
 #   ./simulate.sh <project-dir> [timeout] [expect1] [expect2] ...
 #
+# Scenario (optional): some sketches only show their real behaviour when an
+# sensor value changes mid-run. Pass WOKWI_SCENARIO=scenario.yaml and it is
+# forwarded to wokwi-cli --scenario, so the log proves the branch was taken.
+#   WOKWI_SCENARIO=examples/duck-robot/scenario.yaml ./simulate.sh examples/duck-robot 16000 "AVOID"
+#
 set -uo pipefail
 
 PROJ="${1:-}"
 TIMEOUT="${2:-16000}"
 shift 2 2>/dev/null || true
 EXPECT=("$@")
+SCENARIO="${WOKWI_SCENARIO:-}"
 
 if [ -z "$PROJ" ]; then
   echo "usage: $0 <project-dir> [timeout-ms] [expect-text ...]"
@@ -59,9 +65,12 @@ echo "=== simulation ==="
 echo "  project  : $PROJ"
 echo "  timeout  : ${TIMEOUT} sim-ms (may take ${WALL_MIN}-${WALL_MAX}s wall clock; sim is 1.5x-5x slower)"
 echo "  log file : $LOG"
+[ -n "$SCENARIO" ] && echo "  scenario : $SCENARIO"
 echo ""
 
-"$CLI" --timeout "$TIMEOUT" --serial-log-file "$LOG" "$PROJ"
+SCARGS=()
+[ -n "$SCENARIO" ] && SCARGS=(--scenario "$SCENARIO")
+"$CLI" --timeout "$TIMEOUT" --serial-log-file "$LOG" ${SCARGS[@]+"${SCARGS[@]}"} "$PROJ"
 CODE=$?
 
 echo ""

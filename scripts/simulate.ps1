@@ -10,6 +10,11 @@
     powershell -ExecutionPolicy Bypass -File scripts/simulate.ps1 -Project .\examples\01-traffic-light -Timeout 14000
     powershell -ExecutionPolicy Bypass -File scripts/simulate.ps1 -Project <dir> -Expect "IP:","server started"
 
+  Scenario (optional): a sketch that reacts to a sensor only proves itself when
+  the sensor value changes mid-run. -Scenario scenario.yaml forwards the file to
+  wokwi-cli --scenario, so the log shows the branch was really taken.
+    powershell -File scripts/simulate.ps1 -Project .\examples\duck-robot -Scenario .\examples\duck-robot\scenario.yaml -Expect "AVOID"
+
   ASCII-only on purpose (PowerShell 5.1 reads BOM-less .ps1 as GBK).
 #>
 param(
@@ -19,6 +24,7 @@ param(
   [string[]]$Fail = @(),
   [string]$Token = "",
   [string]$OutDir = "",
+  [string]$Scenario = "",
   [switch]$KeepQuiet
 )
 
@@ -87,13 +93,16 @@ Write-Host ("  project   : " + $proj)
 Write-Host ("  timeout   : {0} sim-ms  (may take {1}-{2}s wall clock; local sim is 1.5x-5x slower)" -f $Timeout, $wallMin, $wallMax)
 Write-Host ("  log file  : " + $log)
 Write-Host ("  token from: " + $tokSrc)
+if ($Scenario) { Write-Host ("  scenario  : " + $Scenario) }
 Write-Host " "
 
 $sw = [Diagnostics.Stopwatch]::StartNew()
 # NOTE: never pipe a native exe through 2>&1 here - PowerShell 5.1 turns each
 # stderr line into an error record and aborts in Stop mode. Redirect to a file.
 $cliOut = Join-Path $OutDir "wokwi-cli.out"
-& $cli --timeout $Timeout --serial-log-file $log $proj *> $cliOut
+$scArgs = @()
+if ($Scenario) { $scArgs = @("--scenario", $Scenario) }
+& $cli --timeout $Timeout --serial-log-file $log @scArgs $proj *> $cliOut
 $code = $LASTEXITCODE
 $sw.Stop()
 

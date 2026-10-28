@@ -1,0 +1,201 @@
+{
+  "version": 1,
+  "author": "AI generated",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-led",
+      "id": "eyeL",
+      "top": 10,
+      "left": -215,
+      "attrs": {
+        "color": "yellow"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "eyeR",
+      "top": 140,
+      "left": -215,
+      "attrs": {
+        "color": "yellow"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "rL",
+      "top": 30,
+      "left": -150,
+      "attrs": {
+        "value": "330"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "rR",
+      "top": 160,
+      "left": -150,
+      "attrs": {
+        "value": "330"
+      }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzz",
+      "top": 270,
+      "left": -160,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "legL",
+      "top": 10,
+      "left": 150,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "legR",
+      "top": 150,
+      "left": 150,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-hc-sr04",
+      "id": "hc",
+      "top": -160,
+      "left": -230,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    [
+      "esp:TX",
+      "$serialMonitor:RX",
+      "",
+      []
+    ],
+    [
+      "esp:RX",
+      "$serialMonitor:TX",
+      "",
+      []
+    ],
+    [
+      "esp:2",
+      "rL:2",
+      "green",
+      []
+    ],
+    [
+      "rL:1",
+      "eyeL:A",
+      "green",
+      []
+    ],
+    [
+      "eyeL:C",
+      "esp:GND.1",
+      "black",
+      []
+    ],
+    [
+      "esp:4",
+      "rR:2",
+      "green",
+      []
+    ],
+    [
+      "rR:1",
+      "eyeR:A",
+      "green",
+      []
+    ],
+    [
+      "eyeR:C",
+      "esp:GND.2",
+      "black",
+      []
+    ],
+    [
+      "esp:13",
+      "buzz:1",
+      "orange",
+      []
+    ],
+    [
+      "buzz:2",
+      "esp:GND.3",
+      "black",
+      []
+    ],
+    [
+      "esp:14",
+      "legL:PWM",
+      "blue",
+      []
+    ],
+    [
+      "legL:V+",
+      "esp:5V",
+      "red",
+      []
+    ],
+    [
+      "legL:GND",
+      "esp:GND.1",
+      "black",
+      []
+    ],
+    [
+      "esp:27",
+      "legR:PWM",
+      "blue",
+      []
+    ],
+    [
+      "legR:V+",
+      "esp:5V",
+      "red",
+      []
+    ],
+    [
+      "legR:GND",
+      "esp:GND.2",
+      "black",
+      []
+    ],
+    [
+      "esp:5",
+      "hc:TRIG",
+      "green",
+      []
+    ],
+    [
+      "esp:18",
+      "hc:ECHO",
+      "yellow",
+      []
+    ],
+    [
+      "hc:VCC",
+      "esp:5V",
+      "red",
+      []
+    ],
+    [
+      "hc:GND",
+      "esp:GND.3",
+      "black",
+      []
+    ]
+  ],
+  "dependencies": {}
+}

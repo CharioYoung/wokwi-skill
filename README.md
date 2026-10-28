@@ -21,15 +21,16 @@ AI：需求解析 → 选型（ESP32 + wokwi-servo + 按键）
 
 ## 在线演示（点开即渲染，无需安装）
 
-这三页是**真实仿真跑完后生成的查看器**，不是录屏：灯的时序由固件逻辑驱动，串口区回放 Wokwi 无头仿真的原始日志，代码区里的 `sketch.ino` / `diagram.json` 与仓库中实际编译通过的原文逐字节一致。
+这四页是**真实仿真跑完后生成的查看器**，不是录屏：灯的时序由固件逻辑驱动，串口区回放 Wokwi 无头仿真的原始日志，代码区里的 `sketch.ino` / `diagram.json` 与仓库中实际编译通过的原文逐字节一致。
 
 | 演示 | 说明 | 直接打开 |
 |---|---|---|
 | 🚦 **ESP32 三色红绿灯** | 纯 GPIO、无第三方库，绿 4s → 黄 1s → 红 4s，可手动切灯 | **<https://charioyoung.github.io/wokwi-skill/examples/traffic-light/sim-viewer.html>** |
 | 💡 **ESP32 远程开关 + 呼吸灯** | WiFi + HTTP 服务器 + PWM，`/on` `/off` `/breathe` 端点 | **<https://charioyoung.github.io/wokwi-skill/examples/remote-switch/sim-viewer.html>** |
 | 🎡 **32 舵机环形阵列（Mega）** | 33 个元件、98 条连线、四段可点动画；`diagram.json` 由真实仿真打印，逐字节一致 | **<https://charioyoung.github.io/wokwi-skill/examples/servo-ring/sim-viewer.html>** |
+| 🦆 **小鸭机器人（多执行器）** | 9 元件 18 条线：LED 眼 + 舵机腿 + 蜂鸣器 + HC-SR04，零第三方库；`scenario.yaml` 注入距离，日志里能证明避障分支真跑过 | **<https://charioyoung.github.io/wokwi-skill/examples/duck-robot/sim-viewer.html>** |
 
-演示入口页（含三个链接与文档索引）：<https://charioyoung.github.io/wokwi-skill/>
+演示入口页（含四个链接与文档索引）：<https://charioyoung.github.io/wokwi-skill/>
 
 > 为什么不是 wokwi.com 的链接？见下方「常见问题」——wokwi-cli 没有创建网页工程的 API，所以本工程用**真实日志驱动的本地查看器**替代，并内置"复制代码/电路 → 打开 Wokwi 空白工程"的 30 秒迁移按钮。
 
@@ -150,7 +151,8 @@ wokwi-skill/
 └── examples/
     ├── traffic-light/           # 纯 GPIO 三色红绿灯（全套可跑，含 README.en.md）
     ├── remote-switch/           # WiFi 网页远程开关 + PWM 呼吸灯（全套可跑，含 README.en.md）
-    └── servo-ring/              # 32 舵机环形阵列 + Mega 85 脚（复杂工程压测，含 README.en.md）
+    ├── servo-ring/              # 32 舵机环形阵列 + Mega 85 脚（复杂工程压测，含 README.en.md）
+    └── duck-robot/              # 小鸭机器人：LED/舵机/蜂鸣器/超声波 4 类外设（含 README.en.md）
 ```
 
 > **双语说明**：仓库内所有 `.md` 都有同名的 `.en.md` 英文版（`README.md` ↔ `README.en.md`、`references/06-viewer.md` ↔ `references/06-viewer.en.md`），每篇顶部有 `中文 | English` 互链。

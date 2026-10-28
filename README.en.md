@@ -22,15 +22,16 @@ This is not "ask a model to write some Arduino code". It **compiles for real, si
 
 ## Live demos (click and it renders — nothing to install)
 
-All three pages are **viewers produced after a real simulation run**, not screen recordings: lamp timing is driven by the firmware's own logic, the serial panel replays the raw log from a headless Wokwi run, and the `sketch.ino` / `diagram.json` embedded in the code panel are byte-identical to the sources that compiled.
+All four pages are **viewers produced after a real simulation run**, not screen recordings: lamp timing is driven by the firmware's own logic, the serial panel replays the raw log from a headless Wokwi run, and the `sketch.ino` / `diagram.json` embedded in the code panel are byte-identical to the sources that compiled.
 
 | Demo | What it shows | Open it |
 |---|---|---|
 | 🚦 **ESP32 traffic light** | Pure GPIO, no third-party library. 4 s green → 1 s yellow → 4 s red, manual override | **<https://charioyoung.github.io/wokwi-skill/examples/traffic-light/sim-viewer.html>** |
 | 💡 **ESP32 remote switch + breathing LED** | WiFi + HTTP server + PWM, `/on` `/off` `/breathe` endpoints | **<https://charioyoung.github.io/wokwi-skill/examples/remote-switch/sim-viewer.html>** |
 | 🎡 **32-servo ring (Mega)** | 33 parts, 98 connections, four clickable sequences; the `diagram.json` was printed by a real simulation and matches byte for byte | **<https://charioyoung.github.io/wokwi-skill/examples/servo-ring/sim-viewer.html>** |
+| 🦆 **Duck robot (many actuators)** | 9 parts, 18 wires: LED eyes + servo legs + buzzer + HC-SR04, zero third-party libraries; `scenario.yaml` drives the distance so the log proves the avoid branch ran | **<https://charioyoung.github.io/wokwi-skill/examples/duck-robot/sim-viewer.html>** |
 
-Landing page with all three links and the doc index: <https://charioyoung.github.io/wokwi-skill/>
+Landing page with all four links and the doc index: <https://charioyoung.github.io/wokwi-skill/>
 
 > Why not a wokwi.com link? See the FAQ below — `wokwi-cli` has no API for creating a web project, so this project ships a **viewer driven by real logs** instead, plus a 30-second migration path ("copy code / copy circuit" → "open a blank Wokwi project").
 
@@ -151,7 +152,8 @@ wokwi-skill/
 └── examples/
     ├── traffic-light/           # pure GPIO traffic light (fully runnable, has README.en.md)
     ├── remote-switch/           # WiFi web remote switch + PWM breathing LED (fully runnable, has README.en.md)
-    └── servo-ring/              # 32-servo ring on a Mega, 85 pins (complex-project stress test, has README.en.md)
+    ├── servo-ring/              # 32-servo ring on a Mega, 85 pins (complex-project stress test, has README.en.md)
+    └── duck-robot/              # Duck robot: LED / servo / buzzer / ultrasonic in one sketch (has README.en.md)
 ```
 
 > **Bilingual**: every `.md` in this repository has a `.en.md` twin (`README.md` ↔ `README.en.md`, `references/06-viewer.md` ↔ `references/06-viewer.en.md`), and each file links to its counterpart at the top via `中文 | English`.
