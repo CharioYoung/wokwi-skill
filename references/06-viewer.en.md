@@ -192,6 +192,20 @@ A double-row header needs special treatment or every name lands on a pad: the co
 
 ### 3.4 Things not to do
 
+- **Do not hand-draw the circuit.** However convincing it looks - a duck, a grey box, three bulbs - it is
+  not a circuit, and the reader cannot see which pin goes where. Worse, a drawing **hides a broken
+  `diagram.json`**: one project had seven invented pin names (`buzz:+` instead of `buzz:1`, `servo:SIG`
+  instead of `PWM`, `esp:GND.6` when an ESP32 only has GND.1-GND.3). The renderer skips those wires;
+  a drawing happily shows them anyway, so everything looks fine. `verify_viewer.js` now fails when the
+  page never calls `PcbView.render(`.
+- **A healthy serial log does not mean the wiring is right.** Firmware never checks the circuit: a
+  `digitalWrite` to a pin with no LED still returns, and the log still prints. The only proof is that
+  `check_circuit.js` reports 0 `UNRESOLVED`.
+- **Place each part so its pins face the board.** A servo has its three pins on the left edge; put it
+  left of the board and every wire has to cut straight through the servo body to reach the header. Put
+  it on the right and the pins already point at the board - shortest wire, nothing crossed. Resistors
+  are unpolarised, so connect whichever end faces the board. LEDs, buzzers and the HC-SR04 have their
+  pins on the bottom edge: park them above or below the board so the wire can leave downwards.
 - **Do not hand-edit the drawing for one project.** It follows `diagram.json`; editing it by hand means lying.
 - **The `viewBox` must contain a rotated part's real outline.** A servo turned by 11 degrees is
   30 units taller than its own footprint, so `left/top + size` clips 15 units off the bottom horns.
@@ -200,7 +214,7 @@ A double-row header needs special treatment or every name lands on a pad: the co
   not trust the thumbnail.
 - **Do not hand-edit the PCB-VIEW block.** It is generated from `scripts/pcbview.js`; edit that and run `node scripts/sync_pcbview.js`.
 - **Do not move parts in `diagram.json` just to make a diagram reach `crossings=0`.** The drawing has to match the real simulation; move a part and it is no longer the same circuit. (The one exception is a part parked 7 units inside the board — an obvious data defect handled by `nudge()`, and the viewer has to say so.)
-- The element library currently covers the ESP32 board, the Arduino Mega, `wokwi-led`, `wokwi-resistor` and `wokwi-servo`. To add a button or an OLED, add that part's pin coordinates to `pinsOf()`; an unknown part returns `{}`, so its wires are skipped rather than drawn in the wrong place.
+- The element library currently covers the ESP32 board, the Arduino Mega, `wokwi-led`, `wokwi-resistor`, `wokwi-servo`, `wokwi-buzzer` and `wokwi-hc-sr04`. To add a button or an OLED: copy the pins from the official `pinInfo` into `pinsOf()`, set the size in `sizeOf()` as `mm * 3.7402`, and write an `xxxSvg()`. **An unregistered part returns `{}` and its wires are skipped silently** - so after adding a part type, run `check_circuit.js` and confirm `UNRESOLVED=0`.
 
 ---
 

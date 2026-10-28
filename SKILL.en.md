@@ -116,21 +116,24 @@ wokwi-cli is headless, does not create web projects, and cannot capture the whol
    ```bash
    node scripts/sync_embed.js <project-dir>     # real .ino / diagram.json -> the page's text/plain blocks
    ```
-4. **The circuit picture is not something you draw**: the PCB-VIEW block parses `diagram.json` and renders the real board, pins and wires, with LED brightness driven by page state, click-to-switch, and hover-to-identify wires. To change the renderer, edit `scripts/pcbview.js` and run `node scripts/sync_pcbview.js`.
+4. **Never draw the circuit - render it**: the PCB-VIEW block parses `diagram.json` and renders the real board, pins and wires, with LED brightness driven by page state, click-to-switch, and hover-to-identify wires. To change the renderer, edit `scripts/pcbview.js` and run `node scripts/sync_pcbview.js`.
+
+   > A duck, a grey box or three bulbs is not a circuit: the reader cannot see which pin goes where, and a drawing **hides a broken `diagram.json`** (a wrong pin name makes the renderer skip that wire; a drawing shows it anyway). `verify_viewer.js` fails when the page never calls `PcbView.render(`.
 5. **Three checks are mandatory**:
    ```bash
    node scripts/verify_viewer.js <project-dir>              # code byte-identical to the real files + JS syntax
    node scripts/domrun.js <project-dir>/sim-viewer.html     # fake DOM really runs boot(); error count must be 0
-   node scripts/check_circuit.js <project-dir>              # circuit geometry: no wire may cut across the board
+   node scripts/check_circuit.js <project-dir>              # geometry + pins: crossings must be 0, UNRESOLVED must be 0
    ```
 6. Open the preview with `present_files`.
 
-**Four hard rules for the viewer (each learned the hard way — break one and it explodes)**:
+**Five hard rules for the viewer (each learned the hard way — break one and it explodes)**:
 
 1. The `.ino` / `diagram.json` on the page must be the **verbatim source that actually compiled**; not a single function, macro or global may be removed.
 2. **Never carry C/C++ code inside a JS template literal** (`\n` becomes a real newline in JS, and after the user copies it Wokwi reports `missing terminating ' character`). Use a `<script type="text/plain" id="inoSrc">` raw text block instead.
 3. Verification must **simulate how the browser reads the value** (normalise exactly like `rawSrc()` and compare); reading the HTML source directly gives false positives.
 4. When editing an existing page, replace only **the target range** — do not use truncation like `slice(0, lastIndexOf('<script>'))`, which also deletes definitions such as `CFG`, leaving a blank page that no syntax check will catch.
+5. **The circuit must come from `PcbView.render(diagram)`.** A working serial log does not prove the wiring: firmware never checks hardware, and `digitalWrite` to an unconnected pin returns happily. `UNRESOLVED` in `check_circuit.js` is the only evidence that it is wired right.
 
 Details and counter-examples are in `references/06-viewer.en.md`.
 

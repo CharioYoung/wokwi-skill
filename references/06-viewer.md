@@ -191,6 +191,17 @@ throw new Error('diagram.json has no supported board. Known: ... ' +
 
 ### 3.4 不要做的事
 
+- **不要手绘电路图**。哪怕画得再像 —— 一只鸭子、一个灰盒子、三颗灯泡 —— 它都不是电路，
+  读者看不到哪个引脚连到哪。而且手绘图会**掩盖坏掉的 `diagram.json`**：项目里 7 个引脚名是编的
+  （`buzz:+` 而不是 `buzz:1`、`servo:SIG` 而不是 `PWM`、`esp:GND.6` 而 ESP32 只有 GND.1~GND.3），
+  渲染器会把这些线跳过，手绘图则照画不误，看起来一切正常。`verify_viewer.js` 现在会在页面里
+  找不到 `PcbView.render(` 时直接失败。
+- **串口日志正常 ≠ 接线正确**。固件不会检查电路：GPIO 上没接灯，`digitalWrite` 照样返回，
+  串口照样打印。判断接线对不对，只能看 `check_circuit.js` 的 `UNRESOLVED` 是不是 0。
+- **元件要摆成"引脚朝向板"**。舵机的三个引脚在左边缘，放在板左侧时，线从引脚出来必须横穿舵机
+  机身才能到板 —— 图上就是一条线直接从舵机中间划过去。放到板右侧，引脚自然对着板，线最短且
+  不穿件。电阻无极性，让靠近板的那一端接板即可。LED / 蜂鸣器 / HC-SR04 的引脚在底边，摆到
+  板的上方或下方，线从底下绕出去。
 - **不要为某个项目手改这张图**。图跟着 `diagram.json` 变，改图等于骗人。
 - **`viewBox` 必须包住旋转后的元件外形**。舵机转 11° 就比它自己的 footprint 高 30 个单位，
   用 `left/top + size` 算会把底部的喇叭口裁掉 15 单位。带 `rotate` 的元件一律改用旋转后的
@@ -198,7 +209,7 @@ throw new Error('diagram.json has no supported board. Known: ... ' +
   这种裁切在卡片里被 `max-height` 盖住看不出来，只有放大到全屏才暴露 —— 所以别只信缩略图。
 - **不要手改页面里的 PCB-VIEW 块**。它由 `scripts/pcbview.js` 生成，改完跑 `node scripts/sync_pcbview.js`。
 - **不要为了让某个图 `crossings=0` 去挪 `diagram.json` 里的零件**。图的出处必须和真实仿真一致；挪了就不是同一个电路了。（唯一例外是零件压进板子里 7 unit 这种明显的数据缺陷，处理方式见 `nudge()`，且要在查看器里写明。）
-- 元件库目前覆盖 ESP32 开发板、Arduino Mega、`wokwi-led`、`wokwi-resistor`、`wokwi-servo`。要加按键/OLED，在 `pinsOf()` 里补上该元件的引脚坐标即可（空元件的 `pinsOf` 返回 `{}`，对应的线会被跳过而不是画错）。
+- 元件库目前覆盖 ESP32 开发板、Arduino Mega、`wokwi-led`、`wokwi-resistor`、`wokwi-servo`、`wokwi-buzzer`、`wokwi-hc-sr04`。要加按键/OLED，在 `pinsOf()` 里补上官方 `pinInfo` 的引脚坐标、在 `sizeOf()` 里补上 `mm × 3.7402` 的尺寸、再写一个 `xxxSvg()` 即可；**没登记的元件 `pinsOf` 返回 `{}`，它的线会被静默跳过** —— 所以新增元件类型时，先跑一遍 `check_circuit.js` 确认 `UNRESOLVED=0`。
 
 ---
 

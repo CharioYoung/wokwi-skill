@@ -116,21 +116,24 @@ wokwi-cli 无头、不建网页工程、截不到全景。让用户"看到并操
    ```bash
    node scripts/sync_embed.js <项目目录>      # 真实 .ino / diagram.json → 页面的 text/plain 块
    ```
-4. **电路图不用画**：页面里的 PCB-VIEW 块直接解析 `diagram.json` 渲染真实板卡/引脚/连线，支持 LED 亮度驱动、点灯切换、悬停看连线。要改渲染器只改 `scripts/pcbview.js`，再 `node scripts/sync_pcbview.js` 同步。
+4. **电路图禁止手绘，只能渲染**：页面里的 PCB-VIEW 块直接解析 `diagram.json` 渲染真实板卡/引脚/连线，支持 LED 亮度驱动、点灯切换、悬停看连线。要改渲染器只改 `scripts/pcbview.js`，再 `node scripts/sync_pcbview.js` 同步。
+
+   > 画一只鸭子、一个灰盒子、三颗灯泡都不算电路 —— 读者看不到哪个引脚连到哪，而且手绘图会**掩盖坏掉的 `diagram.json`**（引脚名写错时渲染器会跳过那条线，手绘图照样画得漂亮）。`verify_viewer.js` 会在页面找不到 `PcbView.render(` 时直接失败。
 5. **必须做三重校验**：
    ```bash
    node scripts/verify_viewer.js <项目目录>     # 代码与真实文件逐字节一致 + JS 语法
    node scripts/domrun.js <项目目录>/sim-viewer.html   # 假 DOM 真跑 boot()，错误数必须为 0
-   node scripts/check_circuit.js <项目目录>    # 电路几何：没有线横穿板子（crossings 必须 0）
+   node scripts/check_circuit.js <项目目录>    # 几何 + 引脚：crossings 必须 0，UNRESOLVED 必须 0
    ```
 6. 用 `present_files` 弹出预览。
 
-**查看器四条铁律（血泪换来的，违反必炸）**：
+**查看器五条铁律（血泪换来的，违反必炸）**：
 
 1. 页面里的 `.ino` / `diagram.json` 必须是**实际编译通过的原文**，函数/宏/全局变量一个都不能删。
 2. **绝不能用 JS 模板字符串承载 C/C++ 代码**（`\n` 会被 JS 解释成真换行，用户复制后 Wokwi 报 `missing terminating ' character`）。必须用 `<script type="text/plain" id="inoSrc">` 原始文本块。
 3. 校验必须**模拟浏览器取值**（按 `rawSrc()` 归一化后比对），直接读 HTML 原文会假阳性。
 4. 改已有页面只能替换**目标区间**，不要用 `slice(0, lastIndexOf('<script>'))` 这类截断写法——会连带删掉 `CFG` 等定义，页面白屏且语法检查查不出来。
+5. **电路图只能由 `PcbView.render(diagram)` 生成**。串口跑通不代表接线对：固件不检查硬件，`digitalWrite` 打在没接灯的脚上照样返回。`check_circuit.js` 的 `UNRESOLVED` 才是接线对不对的唯一证据。
 
 细节与反例见 `references/06-viewer.md`。
 

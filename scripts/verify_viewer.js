@@ -3,10 +3,11 @@
  * verify_viewer.js - Prove that a sim-viewer.html is "honest".
  *
  * Checks, in order:
- *   1. CONSISTENCY  the code / circuit embedded in the page is byte-identical
- *                   to the real .ino / diagram.json in the project
- *   2. SYNTAX       every non-`text/plain` <script> block parses (node --check)
- *   3. COMPILE      (optional, --compile) the extracted .ino still builds
+ *   1.  CONSISTENCY  the code / circuit embedded in the page is byte-identical
+ *                    to the real .ino / diagram.json in the project
+ *   1b. RENDERED     the circuit is produced by PcbView.render(), not hand-drawn
+ *   2.  SYNTAX       every non-`text/plain` <script> block parses (node --check)
+ *   3.  COMPILE      (optional, --compile) the extracted .ino still builds
  *
  * Why step 1 must read textContent, not raw HTML:
  *   A previous version regex-extracted `const INO = `...`` from the raw file.
@@ -147,6 +148,29 @@ if (diaOut === null) {
     consistencyOk = false;
     fail('DIA is not valid JSON: ' + e.message);
   }
+}
+
+// ------------------------------------------------- 1b. rendered, not drawn
+/* A page that draws its own circuit picture is not a circuit view. It looks
+   convincing - a duck-shaped robot with a yellow body and two legs reads as
+   "this is the robot" - while telling the reader nothing about which pin goes
+   where, and it silently hides a broken diagram.json. This happened: a viewer
+   hand-drew a duck and its diagram had seven invented pin names, yet the
+   serial log looked fine because firmware never checks the wiring. */
+console.log('');
+console.log('--- 1b. circuit is rendered, not drawn ---');
+const callsRender = /PcbView\.render\s*\(/.test(html);
+const hasBlock = /=== PCB-VIEW BEGIN/.test(html);
+if (!callsRender) {
+  consistencyOk = false;
+  fail('page never calls PcbView.render(...) - a hand-drawn picture is not a circuit view. ' +
+    'Inline scripts/pcbview.js and render the project\'s own diagram.json.');
+} else if (!hasBlock) {
+  consistencyOk = false;
+  fail('page calls PcbView.render but has no PCB-VIEW block - copy scripts/pcbview.js in verbatim ' +
+    '(node scripts/sync_pcbview.js) so the renderer cannot drift from the rest of the pages.');
+} else {
+  pass('circuit is rendered from diagram.json (PcbView.render + PCB-VIEW block)');
 }
 
 // guard against the classic regression: code inside a JS template literal

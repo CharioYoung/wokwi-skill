@@ -398,6 +398,11 @@ var PcbView = (function () {
   var BH = PIN_Y0 + (LEFT.length - 1) * PITCH + 22;   // + room for the USB jack
   var LED_W = 40, LED_H = 50, RES_W = 58.8, RES_H = 11.3;
   var SERVO_W = 170.08, SERVO_H = 119.55;             // from servo-element viewBox
+  /* 2.54 mm = 9.5 world units, so 1 mm = 3.7402. Sizes below are the official
+     mm footprints converted, not eyeballed. */
+  var MM = 9.5 / 2.54;
+  var BUZZ_W = 17 * MM, BUZZ_H = 20 * MM;   /* 63.6 x 74.8 */
+  var HC_W = 45 * MM, HC_H = 25 * MM;       /* 168.3 x 93.5 */
 
   /* Arduino Mega 2560: 102.66mm x 50.80mm, and Wokwi world units are 9.5 per
      2.54mm, so 383.97 x 190. The 85 pin coordinates below are copied verbatim
@@ -515,6 +520,13 @@ var PcbView = (function () {
       out.GND = [0, 50];
       out['V+'] = [0, 59.5];
       out.PWM = [0, 69];
+    } else if (t === 'wokwi-buzzer') {
+      /* buzzer-element pinInfo, verbatim */
+      out['1'] = [27, 84]; out['2'] = [37, 84];
+    } else if (t === 'wokwi-hc-sr04') {
+      /* hc-sr04-element pinInfo, verbatim - four pins on the bottom edge */
+      out.VCC = [71.3, 94.5]; out.TRIG = [81.3, 94.5];
+      out.ECHO = [91.3, 94.5]; out.GND = [101.3, 94.5];
     }
     return out;
   }
@@ -525,6 +537,8 @@ var PcbView = (function () {
     if (t === 'wokwi-led') return [LED_W, LED_H];
     if (t === 'wokwi-resistor') return [RES_W, RES_H];
     if (t === 'wokwi-servo') return [SERVO_W, SERVO_H];
+    if (t === 'wokwi-buzzer') return [BUZZ_W, BUZZ_H];
+    if (t === 'wokwi-hc-sr04') return [HC_W, HC_H];
     return [40, 40];
   }
 
@@ -761,6 +775,39 @@ var PcbView = (function () {
       '<path d="m7.8 0.29411v2.4117h0.96v-2.4117z" fill="' + b[2] + '"/>' +
       '<rect x="10.69" y="0" width="1" height="3" fill="#F1D863" clip-path="url(#g' + sfx + ')"/>' +
       '</g></svg></g>';
+  }
+
+  /* ---- wokwi-buzzer -------------------------------------------------------
+     Official geometry: a 17x20 mm piezo disc with two X-pins underneath. The
+     pins sit 9.2 units *below* the body (pinInfo says y=84, the body ends at
+     74.8), which is where its legs are, so they are drawn here rather than
+     left as a gap the router would have to bridge. */
+  var BUZZER_ART = '<path d="m7.23 16.5v3.5" fill="none" stroke="#000" stroke-width=".5"/><path d="m9.77 16.5v3.5" fill="#f00" stroke="#f00" stroke-width=".5"/><ellipse cx="8.5" cy="8.5" rx="8.15" ry="8.15" fill="#1a1a1a" stroke="#000" stroke-width=".7"/><circle cx="8.5" cy="8.5" r="6.3472" fill="none" stroke="#000" stroke-width=".3"/><circle cx="8.5" cy="8.5" r="4.3488" fill="none" stroke="#000" stroke-width=".3"/><circle cx="8.5" cy="8.5" r="1.3744" fill="#ccc" stroke="#000" stroke-width=".25"/>';
+
+  function buzzerSvg(part) {
+    return '<g class="pcb-part" data-part="' + esc(part.id) + '" transform="translate(' +
+      num(part.left) + ',' + num(part.top) + ')">' +
+      '<svg width="' + BUZZ_W + '" height="' + BUZZ_H + '" viewBox="0 0 17 20" ' +
+      'xmlns="http://www.w3.org/2000/svg">' + BUZZER_ART + '</svg>' +
+      '<g stroke-width="1.6">' +
+      '<line x1="27" y1="' + BUZZ_H + '" x2="27" y2="84" stroke="#3a3a3a"/>' +
+      '<line x1="37" y1="' + BUZZ_H + '" x2="37" y2="84" stroke="#b91c1c"/>' +
+      '</g></g>';
+  }
+
+  /* ---- wokwi-hc-sr04 -----------------------------------------------------
+     45x25 mm module. The drawing is the official one, verbatim, with its ids
+     suffixed per instance so two sensors can share a page. The four pins hang
+     below the board (pinInfo y=94.5 vs a 93.5 body). */
+  var HC_ART = '<defs> <pattern patternUnits="userSpaceOnUse" width="2" height="2" id="hb__SFX__"> <path d="M0 0h1v1H0zM1 1h1v1H1z" /> </pattern> <radialGradient id="hg__SFX__" cx="8.96" cy="10.04" r="3.58" gradientUnits="userSpaceOnUse"> <stop stop-color="#777" offset="0" /> <stop stop-color="#b9b9b9" offset="1" /> </radialGradient> <g id="hs__SFX__"> <circle cx="8.98" cy="10" r="8.61" fill="#dcdcdc" /> <circle cx="8.98" cy="10" r="7.17" fill="#222" /> <circle cx="8.98" cy="10" r="5.53" fill="#777" fill-opacity=".992" /> <circle cx="8.98" cy="10" r="3.59" fill="url(#hg__SFX__)" /> <circle cx="8.99" cy="10" r=".277" fill="#777" fill-opacity=".818" /> <circle cx="8.98" cy="10" r="5.53" fill="url(#hb__SFX__)" opacity=".397" /> </g> </defs> <path d="M0 0v20.948h45V0zm1.422.464a1 1 0 01.004 0 1 1 0 011 1 1 1 0 01-1 1 1 1 0 01-1-1 1 1 0 01.996-1zm41.956 0a1 1 0 01.004 0 1 1 0 011 1 1 1 0 01-1 1 1 1 0 01-1-1 1 1 0 01.996-1zM1.422 18.484a1 1 0 01.004 0 1 1 0 011 1 1 1 0 01-1 1 1 1 0 01-1-1 1 1 0 01.996-1zm41.956 0a1 1 0 01.004 0 1 1 0 011 1 1 1 0 01-1 1 1 1 0 01-1-1 1 1 0 01.996-1z" fill="#456f93" /> <path d="M15.293 5.888l2.934-2.934v3.124l2.944 2.943v10.143M23.269 19.037v-2.473l-.966-.965v-12.5l2.577 1.488 4.741 4.741" fill="none" stroke="#355a7c" stroke-width=".858" /> <use xlink:href="#hs__SFX__" /> <use xlink:href="#hs__SFX__" x="27.12" /> <g fill="none" stroke="#505132" stroke-width=".368"> <circle cx="43.4" cy="1.46" r="1" /> <circle cx="43.4" cy="19.5" r="1" /> <circle cx="1.43" cy="1.46" r="1" /> <circle cx="1.43" cy="19.5" r="1" /> </g> <rect ry="2.07" y=".626" x="17.111" height="4.139" width="10.272" fill="#878787" stroke="#424242" stroke-width=".368" /> <g fill="black"> <rect x="17.87" y="18" ry=".568" width="2.25" height="2.271" /> <rect x="20.41" y="18" ry=".568" width="2.25" height="2.271" /> <rect x="22.95" y="18" ry=".568" width="2.25" height="2.271" /> <rect x="25.49" y="18" ry=".568" width="2.25" height="2.271" /> </g> <g fill="#ccc" stroke-linecap="round" stroke-width=".21"> <rect x="18.61" y="19" width=".75" height="7" rx=".2" /> <rect x="21.15" y="19" width=".75" height="7" rx=".2" /> <rect x="23.69" y="19" width=".75" height="7" rx=".2" /> <rect x="26.23" y="19" width=".75" height="7" rx=".2" /> </g> <text font-weight="400" font-size="2.2" fill="#e6e6e6" stroke-width=".055"> <tspan y="8" x="17.6">HC-SR04</tspan> </text> <text transform="rotate(-90)" font-weight="400" font-size="1.55" fill="#e6e6e6" stroke-width=".039" > <tspan x="-17.591" y="19.561">VCC</tspan> <tspan x="-17.591" y="22.101">TRIG</tspan> <tspan x="-17.591" y="24.641">ECHO</tspan> <tspan x="-17.591" y="27.181">GND</tspan> </text>';
+
+  function hcSvg(part) {
+    var sfx = '_' + String(part.id).replace(/[^A-Za-z0-9_-]/g, '');
+    return '<g class="pcb-part" data-part="' + esc(part.id) + '" transform="translate(' +
+      num(part.left) + ',' + num(part.top) + ')">' +
+      '<svg width="' + HC_W + '" height="' + HC_H + '" viewBox="0 0 45 25" ' +
+      'xmlns="http://www.w3.org/2000/svg" font-family="monospace">' +
+      HC_ART.split('__SFX__').join(sfx) + '</svg></g>';
   }
 
   /* ------------------------------------------------------------- routing */
@@ -1139,6 +1186,8 @@ var PcbView = (function () {
       if (p.type === 'wokwi-led') return ledSvg(p, bright[p.id]);
       if (p.type === 'wokwi-resistor') return resSvg(p);
       if (p.type === 'wokwi-servo') return servoSvg(p);
+      if (p.type === 'wokwi-buzzer') return buzzerSvg(p);
+      if (p.type === 'wokwi-hc-sr04') return hcSvg(p);
       return '';
     });
 
@@ -1344,7 +1393,7 @@ var PcbView = (function () {
     });
     return audit(dia, routed);
   }, setBrightness: setBrightness, setAngle: setAngle, hornTransform: hornTransform,
-     VERSION: '1.2.0' };
+     VERSION: '1.3.0' };
 })();
 /* === PCB-VIEW END === */
 </script>
