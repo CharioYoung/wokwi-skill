@@ -177,6 +177,6 @@ When the user is unhappy, iterate in this order — `selection → wiring → co
 | `references/07-troubleshooting.en.md` | First place to look for any error |
 | `references/08-examples.en.md` | Want to see the three complete worked examples |
 
-Runnable projects included: `examples/traffic-light/` (pure GPIO state machine), `examples/remote-switch/` (WiFi + HTTP + PWM), `examples/servo-ring/` (Mega + 32 servos + 98 wires, a complex-project stress test).
+Runnable projects included: `examples/traffic-light/` (pure GPIO state machine), `examples/remote-switch/` (WiFi + HTTP + PWM), `examples/servo-ring/` (Mega + 32 servos + 98 wires, a complex-project stress test), `examples/duck-robot/` (LED/servo/buzzer/ultrasonic together, plus scenario injection).
 
 > Every reference also exists in English with the `.en.md` suffix, e.g. `references/06-viewer.en.md`.

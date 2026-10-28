@@ -134,7 +134,7 @@ wokwi-skill/
 │   ├── 03-hardware-selection.md #   选型决策树 + 降级策略
 │   ├── 04-diagram-schema.md     #   diagram.json 格式与元件表（写前必读）
 │   ├── 05-build-and-simulate.md #   编译、仿真参数、观测手段
-│   ├── 06-viewer.md             #   结果查看器规范（四条铁律）
+│   ├── 06-viewer.md             #   结果查看器规范（五条铁律）
 │   ├── 07-troubleshooting.md    #   错误百科（12 个真实案例）
 │   └── 08-examples.md           #   完整案例讲解
 ├── scripts/

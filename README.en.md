@@ -135,7 +135,7 @@ wokwi-skill/
 │   ├── 03-hardware-selection.md #   selection decision tree + fallback strategy
 │   ├── 04-diagram-schema.md     #   diagram.json format and part table (read before writing)
 │   ├── 05-build-and-simulate.md #   compiling, simulation flags, ways to observe
-│   ├── 06-viewer.md             #   viewer spec (four hard rules)
+│   ├── 06-viewer.md             #   viewer spec (the hard rules, incl. §3.4 "things not to do")
 │   ├── 07-troubleshooting.md    #   error encyclopaedia (12 real cases)
 │   └── 08-examples.md           #   full walkthrough of the examples
 ├── scripts/

@@ -177,4 +177,4 @@ wokwi-cli 无头、不建网页工程、截不到全景。让用户"看到并操
 | `references/07-troubleshooting.md` | 任何报错先查这里 |
 | `references/08-examples.md` | 想看三个跑通的完整案例 |
 
-现成可跑工程：`examples/traffic-light/`（纯 GPIO 状态机）、`examples/remote-switch/`（WiFi + HTTP + PWM）、`examples/servo-ring/`（Mega + 32 舵机 + 98 条线，复杂工程压测）。
+现成可跑工程：`examples/traffic-light/`（纯 GPIO 状态机）、`examples/remote-switch/`（WiFi + HTTP + PWM）、`examples/servo-ring/`（Mega + 32 舵机 + 98 条线，复杂工程压测）、`examples/duck-robot/`（LED/舵机/蜂鸣器/超声波 4 类外设协同 + scenario 注入）。
