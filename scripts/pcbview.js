@@ -898,11 +898,28 @@ var PcbView = (function () {
       });
     }
 
-    /* viewBox: everything drawn, plus room for the wire wrap lanes */
+    /* viewBox: everything drawn, plus room for the wire wrap lanes.
+       `frame` is the bounding box of the parts alone, without padding or wire
+       lanes; the viewBox has to contain it or the drawing is cropped. */
     var xs = [], ys = [];
+    var fx0 = Infinity, fy0 = Infinity, fx1 = -Infinity, fy1 = -Infinity;
     dia.parts.forEach(function (p) {
       var sz = sizeOf(p);
-      xs.push(p.left, p.left + sz[0]); ys.push(p.top, p.top + sz[1]);
+      var x0 = p.left, y0 = p.top, x1 = p.left + sz[0], y1 = p.top + sz[1];
+      if (p.rotate) {
+        /* A rotated part sticks out of its unrotated footprint: a servo turned
+           by 11 degrees is 30 units taller than its box, so left/top + size
+           clipped 15 units off the horns at the bottom of the ring. Take the
+           rotated bounding box instead - it is exact, not padding. */
+        var a = p.rotate * Math.PI / 180;
+        var w = Math.abs(sz[0] * Math.cos(a)) + Math.abs(sz[1] * Math.sin(a));
+        var h = Math.abs(sz[0] * Math.sin(a)) + Math.abs(sz[1] * Math.cos(a));
+        var cx = p.left + sz[0] / 2, cy = p.top + sz[1] / 2;
+        x0 = cx - w / 2; x1 = cx + w / 2; y0 = cy - h / 2; y1 = cy + h / 2;
+      }
+      xs.push(x0, x1); ys.push(y0, y1);
+      fx0 = Math.min(fx0, x0); fy0 = Math.min(fy0, y0);
+      fx1 = Math.max(fx1, x1); fy1 = Math.max(fy1, y1);
     });
     xs.push(bx0 - 6, bx1 + 6);
     /* Reserve only the wrap lanes that were actually used. Reserving a fixed
@@ -928,6 +945,7 @@ var PcbView = (function () {
     return {
       svg: svg,
       viewBox: [vx, vy, vw, vh],
+      frame: { x: fx0, y: fy0, w: fx1 - fx0, h: fy1 - fy0 },
       wires: routed.length,
       parts: dia.parts.length,
       pins: { used: Object.keys(used).length, total: pinNames.length },

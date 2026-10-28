@@ -173,7 +173,17 @@ throw new Error('diagram.json has no supported board. Known: ... ' +
 - 点图上的灯 = 切到该灯的手动模式；
 - 悬停**任意引脚**（用到没用到的都算）显示 `引脚名 · → 目标`，空闲引脚显示 `引脚名 · (未使用)`；悬停时该焊盘会亮起青色环；
 - 悬停**导线**显示 `起点 → 终点`（`<title>`），线会变粗；**不要再给导线加 `cursor:help`** —— 浏览器会在箭头旁画一个问号，用户会当成报错（已经踩过）；
-- 「放大」按钮把图放大到整栏宽度，方便看引脚名。
+- 「放大」按钮把整张图铺满视口（`position:fixed` + `inset:0`），再点「还原」或按 <kbd>Esc</kbd>
+  回到卡片里。
+
+  两条踩过的坑，改之前先看：
+
+  1. **放大不能只是「解除 `max-height`」**。如果那张图本来就没被裁（多数图在常见窗口下都没裁），
+     解除后一个像素都不会变，用户会直接判定按钮坏了。要真的换一个铺满视口的状态。
+  2. **`fixed` 元素的高度必须写 `100vh`，不能写 `100%`**。靠 `top/bottom:0` 拉伸出来的高度，
+     其 computed height 仍然是 `auto`，子元素的百分比高度会据此失效、退回 `auto` —— 于是 svg
+     按宽度撑高、冲出视口被 `overflow:hidden` 裁掉一截。svg 撑满视口后，默认的
+     `preserveAspectRatio(meet)` 会自己把整图居中放进去，任何一角都不会丢。
 
 引脚丝印是**全部引脚都打印**的（真实板子就是这么印的），其中电路用到的引脚更亮、并带青色环；只印用到的引脚会让人问"旁边那些空脚是什么"。
 
@@ -182,6 +192,10 @@ throw new Error('diagram.json has no supported board. Known: ... ' +
 ### 3.4 不要做的事
 
 - **不要为某个项目手改这张图**。图跟着 `diagram.json` 变，改图等于骗人。
+- **`viewBox` 必须包住旋转后的元件外形**。舵机转 11° 就比它自己的 footprint 高 30 个单位，
+  用 `left/top + size` 算会把底部的喇叭口裁掉 15 单位。带 `rotate` 的元件一律改用旋转后的
+  AABB：`w' = |w·cos| + |h·sin|`、`h' = |w·sin| + |h·cos|`，再以 footprint 中心加减一半。
+  这种裁切在卡片里被 `max-height` 盖住看不出来，只有放大到全屏才暴露 —— 所以别只信缩略图。
 - **不要手改页面里的 PCB-VIEW 块**。它由 `scripts/pcbview.js` 生成，改完跑 `node scripts/sync_pcbview.js`。
 - **不要为了让某个图 `crossings=0` 去挪 `diagram.json` 里的零件**。图的出处必须和真实仿真一致；挪了就不是同一个电路了。（唯一例外是零件压进板子里 7 unit 这种明显的数据缺陷，处理方式见 `nudge()`，且要在查看器里写明。）
 - 元件库目前覆盖 ESP32 开发板、Arduino Mega、`wokwi-led`、`wokwi-resistor`、`wokwi-servo`。要加按键/OLED，在 `pinsOf()` 里补上该元件的引脚坐标即可（空元件的 `pinsOf` 返回 `{}`，对应的线会被跳过而不是画错）。

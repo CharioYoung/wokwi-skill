@@ -36,7 +36,16 @@
   .pcbwrap{position:relative;border-radius:14px;background:radial-gradient(circle at 50% 30%,#fbfdff,#eef3fb);
     border:1px dashed #d7e0ee;padding:6px;overflow:hidden}
   .pcb-svg{width:100%;height:auto;max-height:620px;display:block}
-  .pcbwrap.big .pcb-svg{max-height:none}
+  /* 放大 = 把图铺满整个视口，而不是只解除 max-height：一张本来就没被裁过的图，
+     解除后看不出任何变化，用户会说按钮坏了。
+     这里必须写 100vh 而不是 height:100% —— fixed 元素靠 top/bottom 拉伸出来的高度，
+     其 computed height 仍是 auto，子元素的百分比高度会直接失效退回 auto，
+     于是 svg 按宽度撑高超出视口、被 overflow:hidden 裁掉（踩过）。
+     svg 撑满视口后，默认的 preserveAspectRatio(meet) 会把整图居中放进去，不会被裁。 */
+  .pcbwrap.big{position:fixed;top:0;right:0;bottom:0;left:0;z-index:80;padding:0;
+    border:0;border-radius:0;background:#f4f7fc;overflow:hidden}
+  .pcbwrap.big .pcb-svg{width:100%;height:100vh;max-height:none}
+  .pcbwrap.big .pcb-tools{right:16px;top:16px}
   .pcb-pinlab{font:5px/1 Helvetica,Arial;fill:#7f8a96;font-weight:600;letter-spacing:-.05px}
   .pcb-pinlab.used{fill:#e8eef6}
   .pcb-wire{transition:stroke-width .12s}
@@ -110,9 +119,9 @@
   <div class="grid">
     <section class="card">
       <h2><span class="dot"></span>电路与执行器 <span style="font-weight:500;text-transform:none;letter-spacing:0;color:#94a3b8;font-size:11px">· 由 diagram.json 实时渲染，非手绘</span></h2>
-      <div class="pcbwrap big" id="pcbwrap">
+      <div class="pcbwrap" id="pcbwrap">
         <div id="pcb"></div>
-        <div class="pcb-tools"><button id="zoomBtn" type="button">放大</button></div>
+        <div class="pcb-tools"><button onclick="toggleZoom()" id="zoomBtn" type="button">放大</button></div>
       </div>
       <div class="legend">
         <span><i style="background:#16a34a"></i>绿 = 信号（GPIO → PWM）</span>
@@ -1701,11 +1710,28 @@ var PcbView = (function () {
       });
     }
 
-    /* viewBox: everything drawn, plus room for the wire wrap lanes */
+    /* viewBox: everything drawn, plus room for the wire wrap lanes.
+       `frame` is the bounding box of the parts alone, without padding or wire
+       lanes; the viewBox has to contain it or the drawing is cropped. */
     var xs = [], ys = [];
+    var fx0 = Infinity, fy0 = Infinity, fx1 = -Infinity, fy1 = -Infinity;
     dia.parts.forEach(function (p) {
       var sz = sizeOf(p);
-      xs.push(p.left, p.left + sz[0]); ys.push(p.top, p.top + sz[1]);
+      var x0 = p.left, y0 = p.top, x1 = p.left + sz[0], y1 = p.top + sz[1];
+      if (p.rotate) {
+        /* A rotated part sticks out of its unrotated footprint: a servo turned
+           by 11 degrees is 30 units taller than its box, so left/top + size
+           clipped 15 units off the horns at the bottom of the ring. Take the
+           rotated bounding box instead - it is exact, not padding. */
+        var a = p.rotate * Math.PI / 180;
+        var w = Math.abs(sz[0] * Math.cos(a)) + Math.abs(sz[1] * Math.sin(a));
+        var h = Math.abs(sz[0] * Math.sin(a)) + Math.abs(sz[1] * Math.cos(a));
+        var cx = p.left + sz[0] / 2, cy = p.top + sz[1] / 2;
+        x0 = cx - w / 2; x1 = cx + w / 2; y0 = cy - h / 2; y1 = cy + h / 2;
+      }
+      xs.push(x0, x1); ys.push(y0, y1);
+      fx0 = Math.min(fx0, x0); fy0 = Math.min(fy0, y0);
+      fx1 = Math.max(fx1, x1); fy1 = Math.max(fy1, y1);
     });
     xs.push(bx0 - 6, bx1 + 6);
     /* Reserve only the wrap lanes that were actually used. Reserving a fixed
@@ -1731,6 +1757,7 @@ var PcbView = (function () {
     return {
       svg: svg,
       viewBox: [vx, vy, vw, vh],
+      frame: { x: fx0, y: fy0, w: fx1 - fx0, h: fy1 - fy0 },
       wires: routed.length,
       parts: dia.parts.length,
       pins: { used: Object.keys(used).length, total: pinNames.length },
@@ -1967,12 +1994,22 @@ const CFG = {
   ].join('\n')
 };
 
+function toggleZoom(){
+  const w=document.getElementById('pcbwrap');
+  if(!w) return;
+  const on=w.classList.toggle('big');
+  const btn=document.getElementById('zoomBtn');
+  if(btn) btn.textContent=on?'还原':'放大';
+  /* 浮层挡住整页，别让底下的页面跟着滚 */
+  document.body.style.overflow=on?'hidden':'';
+}
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Escape') return;
+  const w=document.getElementById('pcbwrap');
+  if(w && w.classList.contains('big')) toggleZoom();
+});
+
 (function wire(){
-  const zoom=document.getElementById('zoomBtn');
-  if(zoom) zoom.addEventListener('click',()=>{
-    const w=document.getElementById('pcbwrap');
-    if(w) w.classList.toggle('big');
-  });
   document.querySelectorAll('.btn').forEach(btn=>{
     btn.addEventListener('click',()=>{
       document.querySelectorAll('.btn').forEach(b=>b.classList.remove('on'));

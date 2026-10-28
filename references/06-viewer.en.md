@@ -173,7 +173,18 @@ Why `leads` is not an error: when a part sits on the board edge — which the 32
 - clicking a lamp in the drawing switches to that lamp's manual mode;
 - hovering **any pin** (used or not) shows `pin · -> target`, and a free pin shows `pin · (unused)`; the pad lights up with a cyan ring while hovered;
 - hovering a **wire** shows `from -> to` (SVG `<title>`) and thickens it. **Do not put `cursor: help` on wires** — the browser then paints a question mark beside the arrow and users read it as an error (this already happened);
-- the "zoom" button widens the drawing to the full column so the pin names are readable.
+- the **zoom** button lifts the drawing into a full-viewport layer (`position:fixed` + `inset:0`);
+  **还原** or <kbd>Esc</kbd> puts it back in the card.
+
+  Two traps, both already hit:/n
+  1. **Zoom must not be "remove `max-height`".** A drawing that was never clipped - which is most
+     of them at normal window sizes - does not change by a single pixel, and the user reports the
+     button as broken. Swap in a genuinely different, viewport-sized state.
+  2. **A `fixed` element needs `100vh`, not `100%`.** Its height comes from the `top`/`bottom`
+     stretch, so its computed height stays `auto`; a child's percentage height then resolves
+     against `auto`, falls back to `auto`, and the svg grows by width until `overflow:hidden`
+     cuts it off. Once the svg fills the viewport, the default `preserveAspectRatio(meet)`
+     centres the whole drawing inside it and nothing is lost.
 
 Every pin name is printed, the way a real board is silkscreened; the pins the circuit uses are brighter and carry a cyan ring. Printing only the used ones made people ask "what are all those empty pins?"
 
@@ -182,6 +193,11 @@ A double-row header needs special treatment or every name lands on a pad: the co
 ### 3.4 Things not to do
 
 - **Do not hand-edit the drawing for one project.** It follows `diagram.json`; editing it by hand means lying.
+- **The `viewBox` must contain a rotated part's real outline.** A servo turned by 11 degrees is
+  30 units taller than its own footprint, so `left/top + size` clips 15 units off the bottom horns.
+  For anything with `rotate`, use the rotated AABB instead:/n  `w' = |w*cos| + |h*sin|`, `h' = |w*sin| + |h*cos|`, centred on the footprint centre. That crop is
+  invisible while the card caps the height with `max-height` - it only shows at full screen, so do
+  not trust the thumbnail.
 - **Do not hand-edit the PCB-VIEW block.** It is generated from `scripts/pcbview.js`; edit that and run `node scripts/sync_pcbview.js`.
 - **Do not move parts in `diagram.json` just to make a diagram reach `crossings=0`.** The drawing has to match the real simulation; move a part and it is no longer the same circuit. (The one exception is a part parked 7 units inside the board — an obvious data defect handled by `nudge()`, and the viewer has to say so.)
 - The element library currently covers the ESP32 board, the Arduino Mega, `wokwi-led`, `wokwi-resistor` and `wokwi-servo`. To add a button or an OLED, add that part's pin coordinates to `pinsOf()`; an unknown part returns `{}`, so its wires are skipped rather than drawn in the wrong place.

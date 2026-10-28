@@ -22,6 +22,12 @@
  *              pin gives no name, and the user is left guessing what it is)
  *   tips       hotspots with an empty <title> (must be 0)
  *
+ * What it cannot see: a drawing cropped by its own viewBox. The frame and the
+ * viewBox are derived from the same numbers, so a check here would only agree
+ * with itself. That bug class is real - a rotated servo sticks out of its
+ * unrotated footprint, and the ring lost 15 units off its bottom horns - but
+ * it has to be caught by looking at the rendered page, not at these numbers.
+ *
  * Usage:
  *   node check_circuit.js                 # every diagram.json under examples/
  *   node check_circuit.js <dir> [<dir>]   # specific project directories
