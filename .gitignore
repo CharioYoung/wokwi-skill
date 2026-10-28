@@ -31,3 +31,7 @@ node_modules/
 
 # 本地调试草稿（截图/探针脚本）不提交
 .dev/
+
+# Microduck 本地预览产物
+microduck/.dev/
+microduck/.edge-profile/
