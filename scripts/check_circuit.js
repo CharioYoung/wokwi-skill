@@ -21,6 +21,14 @@
  *   pins       hover hotspots / total header pins (must match - an unhoverable
  *              pin gives no name, and the user is left guessing what it is)
  *   tips       hotspots with an empty <title> (must be 0)
+ *   labels     parts / pin names printed on the drawing (must match what
+ *              diagram.json declares - a picture that does not say "servo3" or
+ *              "PWM" cannot guide a real bench session)
+ *   shared     length of line that two unrelated wires draw on top of each
+ *              other, and what share of the drawing that is. Under 1% is a
+ *              corner; more means a lane was double-booked.
+ *   bus        length two wires share *because* they meet at a pin. A bus is
+ *              how a schematic draws a junction, so it is reported, not failed.
  *
  * What it cannot see: a drawing cropped by its own viewBox. The frame and the
  * viewBox are derived from the same numbers, so a check here would only agree
@@ -105,7 +113,18 @@ for (const f of files) {
   const emptyTips = (v.svg.match(/<title>\s*<\/title>/g) || []).length;
   const pinOk = hotspots.length === v.pins.total && emptyTips === 0;
 
-  const ok = v.audit.crossings === 0 && unknown === 0 && pinOk;
+  /* Every part that is not the board has to say which part it is, and every
+     one of its legs has to say which leg. Both numbers come from the same
+     diagram.json the drawing came from, so a missing label cannot hide. */
+  const nonBoard = dia.parts.filter((p) => !PcbView.isBoard(p.type)).length;
+  const labelOk = v.labels.parts === nonBoard && v.labels.pins === v.nonBoardPins;
+
+  /* A shared run under 1% of the total is a corner the eye reconciles; above
+     that the picture shows one wire where the diagram has two. */
+  const share = v.audit.wireLen ? v.audit.overlaps / v.audit.wireLen : 0;
+  const sharedOk = share <= 0.01;
+
+  const ok = v.audit.crossings === 0 && unknown === 0 && pinOk && labelOk && sharedOk;
   console.log(
     `  ${ok ? '[OK]  ' : '[FAIL]'} ${label}: parts=${v.parts} wires=${v.wires}/${conns.length - virtual}` +
       (virtual ? ` +${virtual} virtual` : '') +
@@ -113,8 +132,18 @@ for (const f of files) {
       ` crossings=${v.audit.crossings}` +
       ` leads=${v.audit.excused || 0}` +
       ` pins=${hotspots.length}/${v.pins.total} (${v.pins.used} wired)` +
-      (pinOk ? '' : ' PIN-HINT-MISSING')
+      (pinOk ? '' : ' PIN-HINT-MISSING') +
+      ` labels=${v.labels.parts}/${v.labels.pins}` +
+      (labelOk ? '' : ' LABEL-MISSING') +
+      ` shared=${v.audit.overlaps}u/${(share * 100).toFixed(2)}%` +
+      (sharedOk ? '' : ' WIRES-ON-TOP-OF-EACH-OTHER') +
+      ` bus=${v.audit.bus}u`
   );
+  if (!sharedOk) {
+    for (const o of v.audit.overlapPairs) {
+      console.log(`         ${o.len}u  ${o.a}  vs  ${o.b}`);
+    }
+  }
   if (!ok) {
     for (const o of v.audit.offenders) {
       console.log(`         ${o.wire}  ${JSON.stringify(o.from)} -> ${JSON.stringify(o.to)}`);
@@ -125,9 +154,11 @@ for (const f of files) {
 
 console.log('');
 if (bad) {
-  console.log(`RESULT: FAILED - ${bad} problem(s). A wire drawn over the PCB is a routing bug,`);
-  console.log('        not a cosmetic one: fix the router or move the part in diagram.json.');
+  console.log(`RESULT: FAILED - ${bad} problem(s). A wire drawn over the PCB, a doubled`);
+  console.log('        wire, or an unlabelled part is a routing bug, not a cosmetic one:');
+  console.log('        fix the router or move the part in diagram.json.');
   process.exit(1);
 }
-console.log('RESULT: OK - no wire crosses the board, every pin names itself on hover');
+console.log('RESULT: OK - no wire crosses the board, every pin names itself on hover,');
+console.log('        every part and leg is labelled, no two wires share a line');
 console.log('');

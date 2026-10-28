@@ -218,7 +218,7 @@ A double-row header needs special treatment or every name lands on a pad: the co
 
 ---
 
-## 4. The four hard rules (each paid for in blood)
+## 4. The six hard rules (each paid for in blood)
 
 ### Hard rule 1: it must be the verbatim source that actually compiled
 
@@ -298,6 +298,35 @@ node scripts/domrun.js <project-dir>/sim-viewer.html
 It really executes `boot()` in a fake DOM and reports lamp count, netlist characters, selection-table characters, code length, serial line count and **error count**.
 
 **Acceptance: the error count must be 0**, the tower lamp count must match the design, and the netlist/selection tables must be non-empty.
+
+---
+
+### Hard rule 5: the circuit diagram is rendered, never hand-drawn
+
+The page must call `PcbView.render(diagram)`; check 1b in `verify_viewer.js` fails outright when it cannot find it. A missing wire on the picture means a missing wire in `diagram.json` or a misspelt pin name — **do not add it in the viewer, do not guess, do not beautify**. A line you drew yourself is a line nobody can trust.
+
+A hand drawing hides a broken `diagram.json`, and a serial log cannot prove the wiring either. Those three ways of "looking fine", plus element orientation and `viewBox` cropping, are covered in [3.4 Don't do these](#34-dont-do-these).
+
+---
+
+### Hard rule 6: the picture must say what each part is, which leg is which, and no two wires may share a line
+
+The point of the picture is **to wire the thing up**. Drawing only the main board and leaving the buzzer, the servo and the LED unlabelled answers half the question:
+
+- every **non-board part** prints its `id`, its exact type and every pin name (`legL` / `舵机 · wokwi-servo` / `GND V+ PWM`). The type is the verbatim `type` from `diagram.json`, so renaming a part renames the label — never a hand-kept table;
+- the label goes into a **free gutter**: below, above, right, left, then the same four pushed out by one label. Score by "how many things does this box hit", not by "first free slot" — 32 servos in a ring fill every gutter, and first-free-slot lined eight labels up in one row;
+- a wired pin name is dark and bold, an unwired one is light grey, so "is this leg connected" is answerable at a glance;
+- **two unrelated wires may never share a line.** Past six units — about one stroke width — the picture shows one wire where the diagram has two, and the reader cannot follow either.
+
+Two fields of `check_circuit.js` are the acceptance test:
+
+```
+labels=32/96          parts labelled / pin names labelled, must equal what diagram.json declares
+shared=193.5u/0.55%   unrelated wires drawn on each other, and its share of total wire length; must be <= 1%
+bus=275.4u            shared run out of the *same* pin - a junction, the way a schematic draws one; reported, never failed
+```
+
+Above 1% `shared` the check FAILs and prints which two wires met and over what length. The fix is **lane allocation** (see 3.2), not nudging lines afterwards: two runs may share a channel whenever their spans do not overlap — a channel is a resource, not a sequence number.
 
 ---
 

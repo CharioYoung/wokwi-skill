@@ -773,6 +773,7 @@ var PcbView = (function () {
   var GAP = 13;                 // how far a wire clears the board before it turns
   var CLEAR = 11;               // clearance kept from the footprint
   var LANE = 7;                 // spacing between parallel wrap lanes
+  var LANE_V = 7;               // spacing between parallel vertical channels
 
   /* light glow colour per LED colour, same table as @wokwi/elements */
   var GLOW = { red: '#ff8080', green: '#80ff80', blue: '#8080ff',
@@ -790,6 +791,25 @@ var PcbView = (function () {
   var WIRE = { green: '#16a34a', black: '#111827', red: '#dc2626',
                blue: '#2563eb', yellow: '#eab308', white: '#9ca3af',
                orange: '#ea580c', purple: '#9333ea' };
+
+  /* Human names for the parts, because a drawing that only shows a shape
+     cannot tell you what to buy. The type is printed next to the name: it is
+     the exact string in diagram.json, so "which part is this wire going to"
+     is answerable on the picture and in the file at the same time. Override
+     with opts.i18n.partNames for a non-Chinese page. */
+  var PARTNAME = {
+    'wokwi-led': 'LED',
+    'wokwi-resistor': '电阻',
+    'wokwi-servo': '舵机',
+    'wokwi-buzzer': '蜂鸣器',
+    'wokwi-hc-sr04': '超声波测距',
+    'wokwi-pushbutton': '按键',
+    'wokwi-potentiometer': '电位器',
+    'wokwi-dht22': '温湿度',
+    'wokwi-ssd1306': 'OLED',
+    'board-esp32-devkit-c-v4': 'ESP32 开发板',
+    'wokwi-arduino-mega': 'Arduino Mega'
+  };
 
   /* ------------------------------------------------------------ helpers */
   function esc(s) {
@@ -1117,18 +1137,55 @@ var PcbView = (function () {
     var bsize = sizeOf(board);
     var bx0 = board.left, by0 = board.top;
     var bx1 = bx0 + bsize[0], by1 = by0 + bsize[1];
-    var lanes = { top: 0, bot: 0 };
-    /* Vertical channels: every wire that steps out of the header gets its own
-       x offset. Without this, all wires leaving the same side turn at the same
-       x and stack into one thick band that no longer reads as separate wires. */
-    var vlanes = { L: 0, R: 0 };
-    var LANE_V = 5;
-    /* How many parallel channels fit before the wires would run into the parts
-       sitting beside the board. Everything scales off the real layout instead
-       of a magic number, so a dense diagram degrades gracefully. */
+    /* Lane allocation ------------------------------------------------------
+       A "lane" is one offset away from the board: a horizontal channel above
+       or below it, or a vertical channel to its left or right. The previous
+       counter handed every wire a brand new lane and wrapped after six, so two
+       wires could end up on the same offset - drawn as one thick line, which is
+       exactly the "these wires overlap, I cannot follow one" complaint.
+
+       Lanes are a resource, not a sequence: two runs may share one as long as
+       their spans do not overlap. Each lane therefore keeps the spans it
+       already carries, and a new run only moves further out when it would
+       actually collide. Depth is the number of lanes really used, for the
+       viewBox. */
+    var occH = { top: [], bot: [] };   /* per lane: [[x0, x1], ...] */
+    var occV = { L: [], R: [] };       /* per lane: [[y0, y1], ...] */
+    var depth = { top: 0, bot: 0, L: 0, R: 0 };
+
+    /* Every pin of every part, so a channel can dodge them. A vertical channel
+       that happens to land on a part's pin x is worse than a lane further out:
+       the two lines are 0.4 units apart and the eye reads one wire (a servo
+       ring puts its pin axes exactly where the fan-out wants to turn). */
+    var partPins = [];
+    dia.parts.forEach(function (p) {
+      var pl = pinsOf(p);
+      Object.keys(pl).forEach(function (n) {
+        var q = p.rotate ? rotatePt(p, pl[n]) : pl[n];
+        partPins.push([p.left + q[0], p.top + q[1]]);
+      });
+    });
+    function pinAxisHit(x, y0, y1) {
+      for (var i = 0; i < partPins.length; i++) {
+        if (Math.abs(partPins[i][0] - x) < 3.2 &&
+            partPins[i][1] > y0 - 6 && partPins[i][1] < y1 + 6) return true;
+      }
+      return false;
+    }
+    /* The horizontal twin: a wrap lane that lands on a row of pins draws along
+       the wires that leave those pins, which is the same 0.5-unit overlap on
+       the other axis. */
+    function pinRowHit(y, x0, x1) {
+      for (var i = 0; i < partPins.length; i++) {
+        if (Math.abs(partPins[i][1] - y) < 2.4 &&
+            partPins[i][0] > x0 - 6 && partPins[i][0] < x1 + 6) return true;
+      }
+      return false;
+    }
+
     function roomFor(gap) {
       if (!isFinite(gap)) return 6;
-      return Math.max(1, Math.min(6, Math.floor((gap - GAP - 3) / LANE_V) + 1));
+      return Math.max(1, Math.min(6, Math.floor((gap - GAP - 3) / 5) + 1));
     }
     var gL = Infinity, gR = Infinity;
     dia.parts.forEach(function (p) {
@@ -1137,11 +1194,145 @@ var PcbView = (function () {
       if (p.left >= bx1) gR = Math.min(gR, p.left - bx1);
       if (p.left + w <= bx0) gL = Math.min(gL, bx0 - (p.left + w));
     });
-    var VMAX = { L: roomFor(gL), R: roomFor(gR) };
-    function takeDepth(side) {
-      var n = vlanes[side] % VMAX[side];
-      vlanes[side]++;
-      return GAP + n * LANE_V;
+    var SOFT = { L: roomFor(gL), R: roomFor(gR) };
+
+    /* span must be [min, max]. Returns the offset from the baseline, and
+       records who is using that lane. Preference goes to a lane inside the
+       real gutter; a busy side spills outward rather than double-booking a
+       lane, because two wires on one line is worse than a wider drawing. */
+    function allocLane(occ, span, step, side, xBase, dir, axis) {
+      var lo = Math.min(span[0], span[1]), hi = Math.max(span[0], span[1]), k, i;
+      for (k = 0; k < 60; k++) {
+        /* A lane that sits on a pin's own axis is unavailable, not taken: skip
+           it without charging anybody for it. */
+        if (xBase != null) {
+          var c = xBase + dir * k * step;
+          if (axis === 'y') {
+            if (pinRowHit(c, lo, hi)) continue;
+            /* a lane that runs along an existing horizontal wire reads as one
+               wire; the tables only know channels, so ask the drawing too */
+            if (typeof segYClash === 'function' && segYClash(c, lo, hi)) continue;
+          } else {
+            if (pinAxisHit(c, lo, hi)) continue;
+            if (typeof segXClash === 'function' && segXClash(c, lo, hi)) continue;
+          }
+        }
+        var list = occ[k] || (occ[k] = []);
+        var clash = false;
+        for (i = 0; i < list.length; i++) {
+          if (lo < list[i][1] + 4 && list[i][0] < hi + 4) { clash = true; break; }
+        }
+        if (!clash) {
+          list.push([lo, hi]);
+          if (k + 1 > depth[side]) depth[side] = k + 1;
+          return k * step;
+        }
+      }
+      occ[60] = (occ[60] || []).concat([[lo, hi]]);
+      depth[side] = Math.max(depth[side], 61);
+      return 60 * step;
+    }
+    /* Kept for the wider call sites: how deep a pin has to step out before it
+       turns. The span is the run it will travel, so a short wire reuses an
+       inner lane instead of pushing the whole drawing outward. */
+    function takeDepth(side, span) {
+      /* xBase includes GAP because allocLane returns k*step and the caller adds
+         GAP itself - off by that amount, the pin-axis test checked the wrong x
+         and a channel landed 0.4 units from a servo pin. */
+      var base = side === 'L' ? bx0 - GAP : bx1 + GAP;
+      var off = allocLane(occV[side], span, LANE_V, side, base, side === 'L' ? -1 : 1);
+      if (typeof DBGLOG !== 'undefined') DBGLOG.push([side, Math.round(Math.min(span[0],span[1])), Math.round(Math.max(span[0],span[1])), off, base + (side === 'L' ? -1 : 1) * off]);
+      return GAP + off;
+    }
+
+    /* Approach tracks ------------------------------------------------------
+       Two parts often have pins at the same y (both buzzer legs, all four
+       HC-SR04 pins, every servo's V+ row). A wire that arrives at a pin along
+       y therefore lands on the same horizontal line as its neighbour and the
+       two merge into one stroke - the picture shows a single wire feeding two
+       pins, which is simply false. Those arrival runs get their own y, a few
+       units off, and a short vertical stub to the pin. */
+    var occY = [];
+    /* Record a horizontal run nobody may reuse, without moving it. Used for
+       the stub that leaves a pin: it is fixed at the pin's own y, so anything
+       that later wants to arrive along that y has to pick another track. */
+    function markY(y, span) {
+      var a = Math.min(span[0], span[1]), b = Math.max(span[0], span[1]), i, tr = null;
+      for (i = 0; i < occY.length; i++) {
+        if (Math.abs(occY[i].y - y) < 2.2) { tr = occY[i]; break; }
+      }
+      if (!tr) { tr = { y: y, spans: [] }; occY.push(tr); }
+      tr.spans.push([a, b]);
+    }
+    /* Is there already a horizontal run at this y, over this x range? Checks
+       both the approach table and every segment drawn so far: a wire that runs
+       straight between two pins never touches the table, and it is precisely
+       the one an arrival run lands on. */
+    function segYClash(y, x0, x1) {
+      for (var i = 0; i < placed.length; i++) {
+        var p = placed[i][0], q = placed[i][1];
+        if (Math.abs(p[1] - q[1]) > 0.01) continue;
+        if (Math.abs((p[1] + q[1]) / 2 - y) > 2.2) continue;
+        if (x0 < Math.max(p[0], q[0]) + 4 && Math.min(p[0], q[0]) < x1 + 4) return true;
+      }
+      return false;
+    }
+    function segXClash(x, y0, y1) {
+      for (var i = 0; i < placed.length; i++) {
+        var p = placed[i][0], q = placed[i][1];
+        if (Math.abs(p[0] - q[0]) > 0.01) continue;
+        if (Math.abs((p[0] + q[0]) / 2 - x) > 2.6) continue;
+        if (y0 < Math.max(p[1], q[1]) + 4 && Math.min(p[1], q[1]) < y1 + 4) return true;
+      }
+      return false;
+    }
+    function approachY(y, span) {
+      var a = Math.min(span[0], span[1]), b = Math.max(span[0], span[1]);
+      /* Try the side away from the board first. A dodge of seven units that
+         lands on the PCB is a worse wire than the one it avoided, and the
+         away side is a free win whenever the run sits just outside an edge. */
+      var away = y <= (by0 + by1) / 2 ? -1 : 1;
+      var cand = [y], k;
+      for (k = 1; k <= 3; k++) { cand.push(y + away * k * LANE, y - away * k * LANE); }
+      var best = null, bestC = 0;
+      for (k = 0; k < cand.length; k++) {
+        var cy = cand[k], tr = null, i, clash = false;
+        if (segYClash(cy, a, b)) {
+          var c0 = rowCost(cy, a, b);
+          if (!best || c0 < bestC) { best = cy; bestC = c0; }
+          continue;
+        }
+        for (i = 0; i < occY.length; i++) {
+          if (Math.abs(occY[i].y - cy) < 2.2) { tr = occY[i]; break; }
+        }
+        if (tr) {
+          for (i = 0; i < tr.spans.length; i++) {
+            if (a < tr.spans[i][1] + 4 && tr.spans[i][0] < b + 4) { clash = true; break; }
+          }
+        }
+        if (!clash) {
+          if (!tr) { tr = { y: cy, spans: [] }; occY.push(tr); }
+          tr.spans.push([a, b]);
+          return cy;
+        }
+        /* Every track within reach is already busy (a 98-wire harness does
+           that). Giving up means drawing on the one that is busiest, so keep
+           the least contested instead: a short shared stub beats a long one. */
+        var c = rowCost(cy, a, b);
+        if (!best || c < bestC) { best = cy; bestC = c; }
+      }
+      if (best !== null && bestC < rowCost(y, a, b) - 1) return best;
+      return y;
+    }
+    function rowCost(y, a, b) {
+      var t = 0;
+      for (var i = 0; i < placed.length; i++) t += collinearRun([a, y], [b, y], placed[i][0], placed[i][1]);
+      return t;
+    }
+    function colCost(x, a, b) {
+      var t = 0;
+      for (var i = 0; i < placed.length; i++) t += collinearRun([x, a], [x, b], placed[i][0], placed[i][1]);
+      return t;
     }
 
     function absPin(ref) {
@@ -1207,8 +1398,11 @@ var PcbView = (function () {
         if (q && Math.abs(p[0] - q[0]) < 0.01 && Math.abs(p[1] - q[1]) < 0.01) continue;
         if (out.length >= 2) {
           var r = out[out.length - 2];
-          var col = (Math.abs(r[0] - q[0]) < 0.01 && Math.abs(q[0] - p[0]) < 0.01) ||
-                    (Math.abs(r[1] - q[1]) < 0.01 && Math.abs(q[1] - p[1]) < 0.01);
+          /* 1.2, not 0.01: two servo pins can sit a fraction of a unit apart,
+             and a "dodge" of that size is not a bend, it is the same stroke
+             drawn twice. Below one line width the jog has to go. */
+          var col = (Math.abs(r[0] - q[0]) < 1.2 && Math.abs(q[0] - p[0]) < 1.2) ||
+                    (Math.abs(r[1] - q[1]) < 1.2 && Math.abs(q[1] - p[1]) < 1.2);
           if (col) { out[out.length - 1] = p; continue; }
         }
         out.push(p);
@@ -1216,11 +1410,103 @@ var PcbView = (function () {
       return out;
     }
 
+    function freeY(ya, yb, xspan) {
+      var mid = (ya + yb) / 2, cand = [mid], k, i, j;
+      for (k = 1; k <= 10; k++) cand.push(mid - k * LANE, mid + k * LANE);
+      var x0 = Math.min(xspan[0], xspan[1]), x1 = Math.max(xspan[0], xspan[1]);
+      for (k = 0; k < cand.length; k++) {
+        var cy = cand[k], tr = null, clash = false;
+        for (i = 0; i < occY.length; i++) {
+          if (Math.abs(occY[i].y - cy) < 1.2) { tr = occY[i]; break; }
+        }
+        if (tr) {
+          for (j = 0; j < tr.spans.length; j++) {
+            if (x0 < tr.spans[j][1] + 4 && tr.spans[j][0] < x1 + 4) { clash = true; break; }
+          }
+        }
+        if (!clash) {
+          if (!tr) { tr = { y: cy, spans: [] }; occY.push(tr); }
+          tr.spans.push([x0, x1]);
+          return cy;
+        }
+      }
+      return mid;
+    }
+    /* Same idea on the x axis, for the mid-point channel routeDirect picks
+       between two pins that both leave sideways. */
+    var occX = [];
+    function freeX(xa, xb, yspan) {
+      var mid = (xa + xb) / 2, cand = [mid], k, i, j;
+      /* A 98-wire harness fills ten lanes on both sides; giving up at that
+         point drops the run back onto the midpoint, which is already taken.
+         The search has to outlast the wiring, not the first ten tries. */
+      for (k = 1; k <= 26; k++) cand.push(mid - k * LANE_V, mid + k * LANE_V);
+      var y0 = Math.min(yspan[0], yspan[1]), y1 = Math.max(yspan[0], yspan[1]);
+      for (k = 0; k < cand.length; k++) {
+        var cx = cand[k], tr = null, clash = false;
+        for (i = 0; i < occX.length; i++) {
+          if (Math.abs(occX[i].x - cx) < 2.4) { tr = occX[i]; break; }
+        }
+        if (tr) {
+          for (j = 0; j < tr.spans.length; j++) {
+            if (y0 < tr.spans[j][1] + 4 && tr.spans[j][0] < y1 + 4) { clash = true; break; }
+          }
+        }
+        if (!clash && !segXClash(cx, y0, y1)) {
+          if (!tr) { tr = { x: cx, spans: [] }; occX.push(tr); }
+          tr.spans.push([y0, y1]);
+          return cx;
+        }
+      }
+      return mid;
+    }
+    /* approachY for the vertical axis. A ring of servos repeats the same pin
+       column every 45 degrees, so two different wires leave their pins on the
+       exact same x, run 40 units in parallel and read as a single stroke. The
+       run moves a lane over and jogs back at the pin end. */
+    function approachX(x, span) {
+      var a = Math.min(span[0], span[1]), b = Math.max(span[0], span[1]);
+      var away = x <= (bx0 + bx1) / 2 ? -1 : 1;
+      var cand = [x], k;
+      for (k = 1; k <= 8; k++) cand.push(x + away * k * LANE_V, x - away * k * LANE_V);
+      var best = null, bestC = 0;
+      for (k = 0; k < cand.length; k++) {
+        var cx = cand[k], tr = null, i, clash = false;
+        if (segXClash(cx, a, b)) {
+          var c0 = colCost(cx, a, b);
+          if (!best || c0 < bestC) { best = cx; bestC = c0; }
+          continue;
+        }
+        for (i = 0; i < occX.length; i++) {
+          if (Math.abs(occX[i].x - cx) < 2.4) { tr = occX[i]; break; }
+        }
+        if (tr) {
+          for (i = 0; i < tr.spans.length; i++) {
+            if (a < tr.spans[i][1] + 4 && tr.spans[i][0] < b + 4) { clash = true; break; }
+          }
+        }
+        if (!clash) {
+          if (!tr) { tr = { x: cx, spans: [] }; occX.push(tr); }
+          tr.spans.push([a, b]);
+          return cx;
+        }
+        var c = colCost(cx, a, b);
+        if (!best || c < bestC) { best = cx; bestC = c; }
+      }
+      if (best !== null && bestC < colCost(x, a, b) - 1) return best;
+      return x;
+    }
+
     /* Direct routing: step out of each pin along its own edge, then join the two
        stubs orthogonally. Used when the parts surround the board (a ring of 32
        servos cannot be wired with edge-hugging lanes: it would need 30 lanes
        running off the canvas), and as the fallback for boards whose pins face
-       up or down, which the lane router does not model. */
+       up or down, which the lane router does not model.
+
+       The join used to be the exact midpoint of the two stubs, which is the
+       same point for every wire in a fan - 32 PWM wires from one header row all
+       collapsed onto one vertical line. The midpoint is now a channel request
+       like any other: it moves aside when the space is taken. */
     function routeDirect(a, b, pa, pb) {
       var va = exitVec(a) || [1, 0], vb = exitVec(b) || [1, 0];
       var d = 14;
@@ -1228,15 +1514,41 @@ var PcbView = (function () {
       var b1 = [pb[0] + vb[0] * d, pb[1] + vb[1] * d];
       var pts;
       if (va[1] === 0 && vb[1] === 0) {
-        var mx = (a1[0] + b1[0]) / 2;
+        var mx = freeX(a1[0], b1[0], [Math.min(a1[1], b1[1]), Math.max(a1[1], b1[1])]);
+        /* The two straight runs sit on the pin row, which is exactly the y a
+           neighbour leaves from. When both rows are the same y (adjacent servos
+           in the ring) they are one row: move it once and jog at both ends,
+           instead of moving each half and jagging in the middle. */
+        if (Math.abs(a1[1] - b1[1]) <= 2.2) {
+          var ry = approachY(a1[1], [Math.min(a1[0], b1[0]), Math.max(a1[0], b1[0])]);
+          if (Math.abs(ry - a1[1]) > 0.5) return dedupe([pa, a1, [a1[0], ry], [b1[0], ry], b1, pb]);
+        } else {
+          var ay1 = approachY(a1[1], [a1[0], mx]);
+          var by1 = approachY(b1[1], [mx, b1[0]]);
+          if (Math.abs(ay1 - a1[1]) > 0.5 || Math.abs(by1 - b1[1]) > 0.5)
+            return dedupe([pa, a1, [a1[0], ay1], [mx, ay1], [mx, by1], [b1[0], by1], b1, pb]);
+        }
+        markY(a1[1], [a1[0], mx]);
+        markY(b1[1], [mx, b1[0]]);
         pts = [pa, a1, [mx, a1[1]], [mx, b1[1]], b1, pb];
       } else if (va[0] === 0 && vb[0] === 0) {
-        var my = (a1[1] + b1[1]) / 2;
+        var my = freeY(a1[1], b1[1], [Math.min(a1[0], b1[0]), Math.max(a1[0], b1[0])]);
+        if (Math.abs(a1[0] - b1[0]) <= 2.2) {
+          var cx1 = approachX(a1[0], [Math.min(a1[1], b1[1]), Math.max(a1[1], b1[1])]);
+          if (Math.abs(cx1 - a1[0]) > 0.5) return dedupe([pa, a1, [cx1, a1[1]], [cx1, b1[1]], b1, pb]);
+        } else {
+          var ax1 = approachX(a1[0], [a1[1], my]);
+          var bx2 = approachX(b1[0], [my, b1[1]]);
+          if (Math.abs(ax1 - a1[0]) > 0.5 || Math.abs(bx2 - b1[0]) > 0.5)
+            return dedupe([pa, a1, [ax1, a1[1]], [ax1, my], [bx2, my], [bx2, b1[1]], b1, pb]);
+        }
         pts = [pa, a1, [a1[0], my], [b1[0], my], b1, pb];
       } else if (va[1] === 0) {
-        pts = [pa, a1, [b1[0], a1[1]], b1, pb];
+        var ay3 = approachY(a1[1], [a1[0], b1[0]]);
+        pts = [pa, a1, [a1[0], ay3], [b1[0], ay3], b1, pb];
       } else {
-        pts = [pa, a1, [a1[0], b1[1]], b1, pb];
+        var ay4 = approachY(b1[1], [a1[0], b1[0]]);
+        pts = [pa, a1, [a1[0], ay4], [b1[0], ay4], b1, pb];
       }
       return dedupe(pts);
     }
@@ -1246,45 +1558,119 @@ var PcbView = (function () {
        combination of sides, propose a handful of orthogonal shapes, measure
        how much of each would land on the PCB, and keep the best. The two
        plain bends are the old behaviour, so a diagram that already routed
-       cleanly cannot get worse. */
-    var lc = { top: 0, bot: 0, L: 0, R: 0 };
-    function routeFree(pa, pb) {
-      var t0 = by0 - CLEAR - lc.top * LANE, b0 = by1 + CLEAR + lc.bot * LANE;
-      var l0 = bx0 - GAP - lc.L * LANE_V, r0 = bx1 + GAP + lc.R * LANE_V;
-      var cands = [
-        { lane: null, pts: [[pa[0], pa[1]], [pb[0], pa[1]], [pb[0], pb[1]]] },
-        { lane: null, pts: [[pa[0], pa[1]], [pa[0], pb[1]], [pb[0], pb[1]]] },
-        { lane: 'top', pts: [[pa[0], pa[1]], [pa[0], t0], [pb[0], t0], [pb[0], pb[1]]] },
-        { lane: 'bot', pts: [[pa[0], pa[1]], [pa[0], b0], [pb[0], b0], [pb[0], pb[1]]] },
-        { lane: 'R', pts: [[pa[0], pa[1]], [r0, pa[1]], [r0, pb[1]], [pb[0], pb[1]]] },
-        { lane: 'L', pts: [[pa[0], pa[1]], [l0, pa[1]], [l0, pb[1]], [pb[0], pb[1]]] },
-        { lane: 'topR', pts: [[pa[0], pa[1]], [pa[0], t0], [r0, t0], [r0, pb[1]], [pb[0], pb[1]]] },
-        { lane: 'botR', pts: [[pa[0], pa[1]], [pa[0], b0], [r0, b0], [r0, pb[1]], [pb[0], pb[1]]] },
-        { lane: 'topL', pts: [[pa[0], pa[1]], [pa[0], t0], [l0, t0], [l0, pb[1]], [pb[0], pb[1]]] },
-        { lane: 'botL', pts: [[pa[0], pa[1]], [pa[0], b0], [l0, b0], [l0, pb[1]], [pb[0], pb[1]]] }
-      ];
-      var best = null;
-      cands.forEach(function (c) {
-        var p = dedupe(c.pts), over = 0, len = 0, i;
-        for (i = 0; i < p.length - 1; i++) {
-          over += segOverlap(p[i], p[i + 1], [bx0, by0], [bx1, by1]);
-          len += Math.abs(p[i + 1][0] - p[i][0]) + Math.abs(p[i + 1][1] - p[i][1]);
-        }
-        /* strictly fewer crossings wins; on a tie, the shorter run (which is
-           also the one with fewer elbows, since both are orthogonal) */
-        if (!best || over < best.over - 0.01 ||
-            (Math.abs(over - best.over) <= 0.01 && len < best.len - 0.01)) {
-          best = { pts: p, over: over, len: len, lane: c.lane };
-        }
-      });
-      if (best && best.lane) {
-        var keys = { topR: ['top', 'R'], botR: ['bot', 'R'], topL: ['top', 'L'], botL: ['bot', 'L'] };
-        (keys[best.lane] || [best.lane]).forEach(function (k) { lc[k]++; });
+       cleanly cannot get worse.
+
+       The shape is chosen at the innermost lane; only then are the real lane
+       offsets requested. Choosing a shape and an offset at the same time would
+       make the winner depend on which lanes happened to be free. */
+    var SHAPES = ['plain', 'plain2', 'top', 'bot', 'R', 'L', 'topR', 'botR', 'topL', 'botL'];
+    function freeShape(id, pa, pb, t, b, l, r) {
+      switch (id) {
+        case 'plain':  return [[pa[0], pa[1]], [pb[0], pa[1]], [pb[0], pb[1]]];
+        case 'plain2': return [[pa[0], pa[1]], [pa[0], pb[1]], [pb[0], pb[1]]];
+        case 'top':    return [[pa[0], pa[1]], [pa[0], t], [pb[0], t], [pb[0], pb[1]]];
+        case 'bot':    return [[pa[0], pa[1]], [pa[0], b], [pb[0], b], [pb[0], pb[1]]];
+        case 'R':      return [[pa[0], pa[1]], [r, pa[1]], [r, pb[1]], [pb[0], pb[1]]];
+        case 'L':      return [[pa[0], pa[1]], [l, pa[1]], [l, pb[1]], [pb[0], pb[1]]];
+        case 'topR':   return [[pa[0], pa[1]], [pa[0], t], [r, t], [r, pb[1]], [pb[0], pb[1]]];
+        case 'botR':   return [[pa[0], pa[1]], [pa[0], b], [r, b], [r, pb[1]], [pb[0], pb[1]]];
+        case 'topL':   return [[pa[0], pa[1]], [pa[0], t], [l, t], [l, pb[1]], [pb[0], pb[1]]];
+        default:       return [[pa[0], pa[1]], [pa[0], b], [l, b], [l, pb[1]], [pb[0], pb[1]]];
       }
-      return best ? best.pts : [[pa[0], pa[1]], [pb[0], pb[1]]];
     }
 
+    /* Everything already drawn, so a new run can avoid sharing a line with it.
+       Lane tables only know about channels; the wires that run straight between
+       two pins never touch a lane, and they are exactly the ones a later wrap
+       lane lands on. */
+    var placed = [];
+    function noteSegs(pts) {
+      for (var i = 0; i < pts.length - 1; i++) placed.push([pts[i], pts[i + 1]]);
+    }
+    function segClash(p, q) {
+      var sum = 0;
+      for (var i = 0; i < placed.length; i++) sum += collinearRun(p, q, placed[i][0], placed[i][1]);
+      return sum;
+    }
+
+    function routeFree(pa, pb) {
+      var xmin = Math.min(pa[0], pb[0]), xmax = Math.max(pa[0], pb[0]);
+      var ymin = Math.min(pa[1], pb[1]), ymax = Math.max(pa[1], pb[1]);
+      var best = null, i, id;
+      for (i = 0; i < SHAPES.length; i++) {
+        id = SHAPES[i];
+        var p = dedupe(freeShape(id, pa, pb, by0 - CLEAR, by1 + CLEAR, bx0 - GAP, bx1 + GAP));
+        var over = 0, len = 0, share = 0, j;
+        for (j = 0; j < p.length - 1; j++) {
+          over += segOverlap(p[j], p[j + 1], [bx0, by0], [bx1, by1]);
+          len += Math.abs(p[j + 1][0] - p[j][0]) + Math.abs(p[j + 1][1] - p[j][1]);
+          share += segClash(p[j], p[j + 1]);
+        }
+        /* Fewest board crossings first, then the least shared line, then the
+           shorter run. Sharing used to be invisible, so a shape that retraced
+           another wire scored the same as a clean one and won on length. */
+        if (!best || over < best.over - 0.01 ||
+            (Math.abs(over - best.over) <= 0.01 && share < best.share - 0.9) ||
+            (Math.abs(over - best.over) <= 0.01 && Math.abs(share - best.share) <= 0.9 &&
+             len < best.len - 0.01)) {
+          best = { id: id, over: over, len: len, share: share };
+        }
+      }
+      id = best.id;
+      if (id === 'plain' || id === 'plain2') {
+        var flat = dedupe(freeShape(id, pa, pb, 0, 0, 0, 0));
+        /* The plain bend is the only shape that cannot dodge a wire laid
+           earlier: its one long run sits on a pin row by construction. It can
+           still move that run a few lanes over and add a short stub, which is
+           what keeps a 32-servo harness from reading as a single thick line. */
+        if (id === 'plain') {
+          var y2 = approachY(pa[1], [Math.min(pa[0], pb[0]), Math.max(pa[0], pb[0])]);
+          if (Math.abs(y2 - pa[1]) > 0.5) {
+            return dedupe([pa, [pa[0], y2], [pb[0], y2], pb]);
+          }
+        } else {
+          var x2 = freeX(pa[0], pb[0], [Math.min(pa[1], pb[1]), Math.max(pa[1], pb[1])]);
+          if (Math.abs(x2 - pa[0]) > 0.5) {
+            /* Both half-runs sit on a pin row, and a pin row is exactly what a
+               neighbouring wire already left along. Nudge each half onto its
+               own track; the two ends jog back onto the pin. */
+            var ry2 = approachY(pa[1], [Math.min(x2, pa[0]), Math.max(x2, pa[0])]);
+            var ry3 = approachY(pb[1], [Math.min(x2, pb[0]), Math.max(x2, pb[0])]);
+            return dedupe([pa, [pa[0], ry2], [x2, ry2], [x2, ry3], [pb[0], ry3], pb]);
+          }
+        }
+        return flat;
+      }
+
+      /* Vertical channels first: their span is just the two pins' y range.
+         Horizontal channels then reserve the x range the finished run will
+         actually cover, which includes the vertical channel on either side. */
+      var yspan = [ymin - CLEAR, ymax + CLEAR];
+      var l = bx0 - takeDepth('L', yspan);
+      var r = bx1 + takeDepth('R', yspan);
+      var t = by0 - CLEAR;
+      var b = by1 + CLEAR;
+      if (id === 'top' || id === 'bot' || id === 'topR' || id === 'botR' ||
+          id === 'topL' || id === 'botL') {
+        var x0 = xmin, x1 = xmax;
+        if (id === 'topR' || id === 'botR') { x0 = Math.min(pa[0], r); x1 = Math.max(pa[0], r); }
+        if (id === 'topL' || id === 'botL') { x0 = Math.min(pa[0], l); x1 = Math.max(pa[0], l); }
+        if (id.charAt(0) === 't') t = by0 - CLEAR - allocLane(occH.top, [x0, x1], LANE, 'top', by0 - CLEAR, -1, 'y');
+        else b = by1 + CLEAR + allocLane(occH.bot, [x0, x1], LANE, 'bot', by1 + CLEAR, 1, 'y');
+      }
+      return dedupe(freeShape(id, pa, pb, t, b, l, r));
+    }
+
+    /* Every branch registers what it drew, so the next wire's cost function
+       knows about it. Kept in one place on purpose: a branch that forgets to
+       register is a wire the next one is free to draw on top of. */
     function route(a, b, pa, pb) {
+      var pts = routeRaw(a, b, pa, pb);
+      noteSegs(pts);
+      return pts;
+    }
+
+    function routeRaw(a, b, pa, pb) {
       var x1 = pa[0], y1 = pa[1], x2 = pb[0], y2 = pb[1];
       var sa = sideOf(a), sb = sideOf(b);
       if (mode === 'direct') return routeDirect(a, b, pa, pb);
@@ -1298,7 +1684,7 @@ var PcbView = (function () {
         if (Math.abs(y1 - y2) < 1) return [[x1, y1], [x2, y2]];
         /* A double-row header puts one column inside the footprint, so the
            turn has to be measured from the board edge, not from the pin. */
-        var d3 = takeDepth(sa);
+        var d3 = takeDepth(sa, [Math.min(y1, y2), Math.max(y1, y2)]);
         var ch = sa === 'L' ? Math.min(x1, x2, bx0) - d3 : Math.max(x1, x2, bx1) + d3;
         return [[x1, y1], [ch, y1], [ch, y2], [x2, y2]];
       }
@@ -1309,27 +1695,60 @@ var PcbView = (function () {
         if (!s) continue;
         var p1 = pairs[i][1], p2 = pairs[i][2], other = pairs[i][3];
         var ox = p1[0], oy = p1[1], tx = p2[0], ty = p2[1];
-        var depth = takeDepth(s);
-        /* Same trap as above: the turn must clear the edge, not the pin, or a
-           double-row column drags the run across the PCB. */
-        var out = s === 'L' ? Math.min(ox - depth, bx0 - depth) : Math.max(ox + depth, bx1 + depth);
         var sameSide = (s === 'L' && tx < bx0) || (s === 'R' && tx > bx1);
-        if (sameSide) return [[ox, oy], [out, oy], [out, ty], [tx, ty]];
-
-        var mid = (by0 + by1) / 2, wy, back;
-        if (ty < mid && Math.abs(ty - by0) <= Math.abs(ty - by1)) {
-          wy = by0 - CLEAR - lanes.top * LANE; lanes.top++;
-        } else {
-          wy = by1 + CLEAR + lanes.bot * LANE; lanes.bot++;
+        if (sameSide) {
+          var dv = takeDepth(s, [Math.min(oy, ty) - 3 * LANE - 4, Math.max(oy, ty) + 3 * LANE + 4]);
+          /* Same trap as above: the turn must clear the edge, not the pin, or
+             a double-row column drags the run across the PCB. */
+          var outS = s === 'L' ? Math.min(ox - dv, bx0 - dv) : Math.max(ox + dv, bx1 + dv);
+          /* The stub out of the pin is horizontal at the pin's own y. Two pins
+             sharing a row (a double header, or two legs of the same part) would
+             lay those stubs on one line, so the second one steps off it first. */
+          var oyS = approachY(oy, [ox, outS]);
+          var headS = Math.abs(oyS - oy) < 0.5 ? [[ox, oy]]
+                                               : [[ox, oy], [ox, oyS]];
+          var ayS = approachY(ty, [outS, tx]);
+          if (Math.abs(ayS - ty) < 0.5) return headS.concat([[outS, oyS], [outS, ty], [tx, ty]]);
+          return headS.concat([[outS, oyS], [outS, ayS], [tx, ayS], [tx, ty]]);
         }
+
         /* Which edge the target sits on decides where the last leg drops in.
            Deciding by "tx < bx0" is wrong: a header pin lives INSIDE the
            footprint, and that mistake draws the wire straight across the PCB. */
         var tside = tx > bx1 ? 'R' : (tx < bx0 ? 'L' : sideOf(other));
-        var d2 = takeDepth(tside === 'L' ? 'L' : 'R');
-        if (tside === 'L') back = bx0 - d2;
-        else back = bx1 + d2;
-        return [[ox, oy], [out, oy], [out, wy], [back, wy], [back, ty], [tx, ty]];
+        var mid = (by0 + by1) / 2, up = ty < mid && Math.abs(ty - by0) <= Math.abs(ty - by1);
+        /* out and back are only known after their lanes are picked, so the
+           horizontal channel reserves a span that already includes the usual
+           step-out; without that margin a later run can land on the same lane
+           and overlap the part of this one that sticks out further. */
+        var out0 = s === 'L' ? Math.min(ox - GAP, bx0 - GAP) : Math.max(ox + GAP, bx1 + GAP);
+        var back0 = tside === 'L' ? bx0 - GAP : bx1 + GAP;
+        var hspan = [Math.min(out0, back0) - 30, Math.max(out0, back0) + 30];
+        var wy = up ? by0 - CLEAR - allocLane(occH.top, hspan, LANE, 'top', by0 - CLEAR, -1, 'y')
+                    : by1 + CLEAR + allocLane(occH.bot, hspan, LANE, 'bot', by1 + CLEAR, 1, 'y');
+        /* the arrival run may step a few lanes off the pin row, so the
+           channel has to reserve that much more than the pin-to-wrap span */
+        var slack = 3 * LANE + 4;
+        var dOut = takeDepth(s, [Math.min(oy, wy) - slack, Math.max(oy, wy) + slack]);
+        var out = s === 'L' ? Math.min(ox - dOut, bx0 - dOut) : Math.max(ox + dOut, bx1 + dOut);
+        /* A pin standing well clear of the board drags the channel out with it,
+           so two neighbouring servos end up with channels a fraction of a unit
+           apart and their vertical runs merge. Ask for a real offset. */
+        out = approachX(out, [Math.min(oy, wy), Math.max(oy, wy)]);
+        var oy2 = approachY(oy, [ox, out]);
+        var head = Math.abs(oy2 - oy) < 0.5 ? [[ox, oy]] : [[ox, oy], [ox, oy2]];
+        /* tside can be null when the target pin sits inside the footprint
+           (a servo parked on a corner) - fall back to the right-hand channel
+           instead of indexing the lane table with null. */
+        var tSideKey = tside === 'L' ? 'L' : 'R';
+        var dBack = takeDepth(tSideKey, [Math.min(ty, wy) - slack, Math.max(ty, wy) + slack]);
+        var back = tSideKey === 'L' ? bx0 - dBack : bx1 + dBack;
+        back = approachX(back, [Math.min(ty, wy), Math.max(ty, wy)]);
+        var ay = approachY(ty, [back, tx]);
+        if (Math.abs(ay - ty) < 0.5) {
+          return head.concat([[out, oy2], [out, wy], [back, wy], [back, ty], [tx, ty]]);
+        }
+        return head.concat([[out, oy2], [out, wy], [back, wy], [back, ay], [tx, ay], [tx, ty]]);
       }
 
       if (Math.abs(y1 - y2) < 1) return [[x1, y1], [x2, y2]];
@@ -1338,7 +1757,8 @@ var PcbView = (function () {
     }
 
     return { route: route, routeDirect: routeDirect, absPin: absPin, edgeOf: edgeOf,
-             bx0: bx0, by0: by0, bx1: bx1, by1: by1, lanes: lanes };
+             exitVec: exitVec, bx0: bx0, by0: by0, bx1: bx1, by1: by1,
+             depth: depth, soft: SOFT, occ: { h: occH, v: occV } };
   }
 
   /* --------------------------------------------------------------- audit */
@@ -1361,8 +1781,25 @@ var PcbView = (function () {
     return Math.sqrt(Math.pow(dx * (t1 - t0), 2) + Math.pow(dy * (t1 - t0), 2));
   }
 
-  function audit(dia, routed, mode) {
-    var r = makeRouter(dia, byId(dia), mode), offenders = [];
+  /* Two segments on the same line, sharing a span, are drawn on top of each
+     other: the eye sees one wire where the diagram has two, and you cannot tell
+     where either one goes. Touching end to end is fine (a chain of GND links
+     meets its neighbour at a pin), so only real shared length counts. */
+  function collinearRun(p, q, r, s) {
+    var h1 = Math.abs(p[1] - q[1]) < 0.01, h2 = Math.abs(r[1] - s[1]) < 0.01;
+    if (h1 !== h2) return 0;
+    var c1 = h1 ? (p[1] + q[1]) / 2 : (p[0] + q[0]) / 2;
+    var c2 = h1 ? (r[1] + s[1]) / 2 : (r[0] + s[0]) / 2;
+    if (Math.abs(c1 - c2) > 1.6) return 0;
+    var a0 = Math.min(h1 ? p[0] : p[1], h1 ? q[0] : q[1]);
+    var a1 = Math.max(h1 ? p[0] : p[1], h1 ? q[0] : q[1]);
+    var b0 = Math.min(h1 ? r[0] : r[1], h1 ? s[0] : s[1]);
+    var b1 = Math.max(h1 ? r[0] : r[1], h1 ? s[0] : s[1]);
+    return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+  }
+
+  function audit(dia, routed, mode, shared) {
+    var r = shared || makeRouter(dia, byId(dia), mode), offenders = [];
     if (!r) return { wires: 0, crossings: 0, offenders: [], excused: 0, mode: mode };
     /* Every pin of every part, not just the header. A part parked on the board
        edge (the 32-servo ring does exactly that at every corner) puts its own
@@ -1387,14 +1824,67 @@ var PcbView = (function () {
         [pa, pb].forEach(function (end) {
           pinPts.forEach(function (xy) {
             if (Math.abs(end[0] - xy[0]) < 0.6 && Math.abs(end[1] - xy[1]) < 0.6) legal = true;
+            /* A stub that was moved off the pin's own row to avoid sharing it
+               still starts at the pin's x - that is the same lead, one lane
+               over, not a wire crossing the board. */
+            else if (Math.abs(end[0] - xy[0]) < 0.7 && Math.abs(end[1] - xy[1]) <= 16) legal = true;
+            else if (Math.abs(end[1] - xy[1]) < 0.7 && Math.abs(end[0] - xy[0]) <= 16) legal = true;
           });
         });
         if (legal) { excused++; continue; }
         offenders.push({ wire: w.title, from: pa, to: pb });
       }
     });
+    /* Overlap pass: walk every pair of segments once. A drawing where two wires
+       share a line reads as a single wire, so the count has to be zero - but it
+       cannot be seen by looking at one segment at a time, which is why it went
+       unnoticed for three examples. */
+    var segs = [];
+    routed.forEach(function (w, wi) {
+      for (var i = 0; i < w.pts.length - 1; i++) {
+        segs.push({ w: wi, title: w.title, a: w.pts[i], b: w.pts[i + 1] });
+      }
+    });
+    var overlapLen = 0, busLen = 0, overlapPairs = [], si, sj, wireLen = 0;
+    segs.forEach(function (g) { wireLen += Math.abs(g.b[0] - g.a[0]) + Math.abs(g.b[1] - g.a[1]); });
+    function nearPin(pt) {
+      for (var i = 0; i < pinPts.length; i++) {
+        if (Math.abs(pt[0] - pinPts[i][0]) < 0.6 && Math.abs(pt[1] - pinPts[i][1]) < 0.6) return true;
+      }
+      return false;
+    }
+    for (si = 0; si < segs.length; si++) {
+      for (sj = si + 1; sj < segs.length; sj++) {
+        var ov = collinearRun(segs[si].a, segs[si].b, segs[sj].a, segs[sj].b);
+        /* Under six units the two strokes are inside each other's width and
+           the eye reads a corner; that is not a shared run, it is a join. */
+        if (ov <= 6) continue;
+        /* Two wires that meet at a pin may share the run out of it: that is a
+           bus, and every schematic draws one that way. It is counted (bus)
+           but never failed - what this pass hunts is two unrelated wires that
+           landed on the same lane. */
+        var mine = [segs[si].a, segs[si].b], theirs = [segs[sj].a, segs[sj].b];
+        var samePin = false, e1, e2;
+        for (e1 = 0; e1 < 2 && !samePin; e1++) {
+          for (e2 = 0; e2 < 2 && !samePin; e2++) {
+            if (Math.abs(mine[e1][0] - theirs[e2][0]) < 0.6 &&
+                Math.abs(mine[e1][1] - theirs[e2][1]) < 0.6 && nearPin(mine[e1])) samePin = true;
+          }
+        }
+        if (samePin) { busLen += ov; continue; }
+        overlapLen += ov;
+        if (overlapPairs.length < 10) {
+          overlapPairs.push({ a: segs[si].title, b: segs[sj].title, len: Math.round(ov * 10) / 10,
+            at: [segs[si].a, segs[si].b, segs[sj].a, segs[sj].b] });
+        }
+      }
+    }
+
     return { wires: n, crossings: offenders.length, offenders: offenders,
-             excused: excused, mode: mode || 'avoid' };
+             excused: excused, mode: mode || 'avoid',
+             overlaps: Math.round(overlapLen * 10) / 10, bus: Math.round(busLen * 10) / 10,
+             wireLen: Math.round(wireLen * 10) / 10, overlapPairs: overlapPairs,
+             depth: r.depth };
   }
 
   /* -------------------------------------------------------------- render */
@@ -1468,7 +1958,7 @@ var PcbView = (function () {
 
     /* 98 wires at full weight merge into one blob; a 32-servo ring is a
        harness, and drawing it thinner is what makes it readable as wires. */
-    var sw = routed.length > 40 ? 1.3 : 2.3;
+    var sw = routed.length > 40 ? 1.2 : 2.0;
     var wires = routed.map(function (w) {
       var d = 'M' + w.pts.map(function (p) { return num(p[0]) + ' ' + num(p[1]); }).join(' L');
       return '<path class="pcb-wire" d="' + d + '" fill="none" stroke="' + (WIRE[w.color] || w.color) +
@@ -1476,7 +1966,27 @@ var PcbView = (function () {
         esc(w.title) + '</title></path>';
     });
 
-    var bodies = dia.parts.map(function (p) {
+    /* Footprints in world coordinates, rotation included. The same numbers
+       drive the viewBox and the label placement, so a label can never be put
+       where the drawing thinks there is nothing. */
+    var geom = dia.parts.map(function (p) {
+      var sz = sizeOf(p), x0 = p.left, y0 = p.top, x1 = p.left + sz[0], y1 = p.top + sz[1];
+      if (p.rotate) {
+        /* A rotated part sticks out of its unrotated footprint: a servo turned
+           by 11 degrees is 30 units taller than its box, so left/top + size
+           clipped 15 units off the horns at the bottom of the ring. Take the
+           rotated bounding box instead - it is exact, not padding. */
+        var a = p.rotate * Math.PI / 180;
+        var w = Math.abs(sz[0] * Math.cos(a)) + Math.abs(sz[1] * Math.sin(a));
+        var h = Math.abs(sz[0] * Math.sin(a)) + Math.abs(sz[1] * Math.cos(a));
+        var cx = p.left + sz[0] / 2, cy = p.top + sz[1] / 2;
+        x0 = cx - w / 2; x1 = cx + w / 2; y0 = cy - h / 2; y1 = cy + h / 2;
+      }
+      return { p: p, x0: x0, y0: y0, x1: x1, y1: y1 };
+    });
+
+    var bodies = geom.map(function (g) {
+      var p = g.p;
       if (isBoard(p.type)) return boardSvg(p, '_' + String(p.id).replace(/[^A-Za-z0-9_-]/g, ''));
       if (p.type === 'wokwi-led') return ledSvg(p, bright[p.id]);
       if (p.type === 'wokwi-resistor') return resSvg(p);
@@ -1488,7 +1998,7 @@ var PcbView = (function () {
 
     /* Which header pins the circuit touches, and what each one feeds. Built
        from the connections alone, so it stays true when diagram.json changes. */
-    var used = {}, pinLinks = {};
+    var used = {}, pinLinks = {}, linked = {};
     (dia.connections || []).forEach(function (c2) {
       var refs = [c2[0], c2[1]];
       refs.forEach(function (ref, ix) {
@@ -1496,7 +2006,11 @@ var PcbView = (function () {
         var k = String(ref).indexOf(':');
         if (k < 0) return;
         var pid = ref.slice(0, k), nm = ref.slice(k + 1);
-        if (!index[pid] || !isBoard(index[pid].type)) return;
+        if (!index[pid]) return;
+        /* linked = every part pin the circuit touches, board or not: it decides
+           whether a pin name is printed dark (wired) or pale (spare). */
+        linked[pid + ':' + nm] = 1;
+        if (!isBoard(index[pid].type)) return;
         used[pid + ':' + nm] = 1;
         (pinLinks[nm] || (pinLinks[nm] = [])).push(String(refs[1 - ix]));
       });
@@ -1586,35 +2100,125 @@ var PcbView = (function () {
       });
     }
 
-    /* viewBox: everything drawn, plus room for the wire wrap lanes.
+    /* Part names, types and pin names -------------------------------------
+       The board silkscreen answers "which header pin", which is half of what a
+       bench session needs. The other half is "what is this part, which one of
+       it, and which leg is this wire on" - and a picture that cannot answer
+       that cannot guide real wiring. So every non-board part is labelled with
+       its id and its exact Wokwi type, and each of its pins is named where it
+       sits. All of it comes from diagram.json: rename a part and the label
+       follows. */
+    var notes = [], noteBoxes = [];
+    var labelled = { parts: 0, pins: 0 }, expectedPins = 0;
+    function textW(s, size) {
+      var w = 0;
+      for (var i = 0; i < s.length; i++) w += s.charCodeAt(i) > 255 ? size : size * 0.55;
+      return w;
+    }
+    function boxOf(x, y, w, h) { return [x, y, x + w, y + h]; }
+    /* How crowded is a label box? A count, not a yes/no: with 32 servos in a
+       ring every gutter within a label's reach is taken by something, and
+       "first free slot or give up" put eight labels on one line. The least bad
+       slot is still a readable label. */
+    function boxHits(b, pad) {
+      var i, g, n, k = 0;
+      for (i = 0; i < geom.length; i++) {
+        g = geom[i];
+        if (b[0] < g.x1 + pad && g.x0 < b[2] + pad && b[1] < g.y1 + pad && g.y0 < b[3] + pad) k += 4;
+      }
+      for (i = 0; i < noteBoxes.length; i++) {
+        n = noteBoxes[i];
+        if (b[0] < n[2] + 2 && n[0] < b[2] + 2 && b[1] < n[3] + 2 && n[1] < b[3] + 2) k += 1;
+      }
+      return k;
+    }
+    geom.forEach(function (g) {
+      if (isBoard(g.p.type)) return;
+      expectedPins += Object.keys(pinsOf(g.p)).length;
+    });
+    var partNames = (opts.i18n && opts.i18n.partNames) || PARTNAME;
+    var HALO = ' paint-order="stroke" stroke="#ffffff" stroke-width="2.6" stroke-linejoin="round"';
+    var MONO = ' ui-monospace,SFMono-Regular,Consolas,monospace';
+    if (showLabels) {
+      geom.forEach(function (g) {
+        var p = g.p;
+        if (isBoard(p.type)) return;
+        var name = partNames[p.type] || String(p.type).replace(/^wokwi-/, '');
+        var l1 = String(p.id), l2 = name + ' \u00b7 ' + p.type;
+        var wid = Math.max(textW(l1, 9.2), textW(l2, 6.8)), hgt = 21;
+        labelled.parts++;
+        var cx = (g.x0 + g.x1) / 2, cy = (g.y0 + g.y1) / 2;
+        /* Below, above, right, left - and then the same four pushed a label
+           further out. A label on a part or on another label is worse than one
+           a little further away, so the closest slot that is clear wins; in a
+           dense drawing nothing is clear and the least crowded one wins. */
+        var gap = 4, cand = [
+          { x: cx - wid / 2, y: g.y1 + gap },
+          { x: cx - wid / 2, y: g.y0 - hgt - gap },
+          { x: g.x1 + 7, y: cy - 10 },
+          { x: g.x0 - 7 - wid, y: cy - 10 },
+          { x: cx - wid / 2, y: g.y1 + gap + hgt + 6 },
+          { x: cx - wid / 2, y: g.y0 - 2 * hgt - gap - 6 },
+          { x: g.x1 + 7, y: g.y1 + gap },
+          { x: g.x0 - 7 - wid, y: g.y1 + gap }
+        ];
+        var pick = cand[0], best = boxHits(boxOf(cand[0].x, cand[0].y, wid, hgt), 3), i, k;
+        for (i = 1; i < cand.length; i++) {
+          k = boxHits(boxOf(cand[i].x, cand[i].y, wid, hgt), 3);
+          if (k < best) { best = k; pick = cand[i]; if (!k) break; }
+        }
+        noteBoxes.push(boxOf(pick.x, pick.y, wid, hgt));
+        notes.push('<text x="' + num(pick.x) + '" y="' + num(pick.y + 10) + '" font-family="' + MONO +
+          '" font-size="9.2" font-weight="700" fill="#0f172a"' + HALO + '>' + esc(l1) + '</text>');
+        notes.push('<text x="' + num(pick.x) + '" y="' + num(pick.y + 20) +
+          '" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif"' +
+          ' font-size="6.8" fill="#475569"' + HALO + '>' + esc(l2) + '</text>');
+      });
+
+      /* Pin names on the parts, not just the board. A LED with A and C printed
+         is the difference between "the black wire goes to the short leg" and a
+         guess. Each name sits on its pin's outward side, in the gap the router
+         leaves, so it does not cover the part it describes. */
+      geom.forEach(function (g) {
+        var p = g.p;
+        if (isBoard(p.type)) return;
+        var pl = pinsOf(p);
+        Object.keys(pl).forEach(function (nm) {
+          var xy = router.absPin(p.id + ':' + nm);
+          if (!xy) return;
+          var v = router.exitVec(p.id + ':' + nm) || [1, 0];
+          var x2 = xy[0] + v[0] * 6.5, y2 = xy[1] + 2.4;
+          var anchor = v[0] > 0 ? 'start' : (v[0] < 0 ? 'end' : 'middle');
+          if (v[0] === 0) { x2 = xy[0]; y2 = xy[1] + (v[1] > 0 ? 10.2 : -5.0); }
+          var wired = linked[p.id + ':' + nm];
+          labelled.pins++;
+          notes.push('<text x="' + num(x2) + '" y="' + num(y2) + '" text-anchor="' + anchor +
+            '" font-family="' + MONO + '" font-size="7.0" font-weight="' + (wired ? 700 : 400) +
+            '" fill="' + (wired ? '#155e75' : '#94a3b8') + '" paint-order="stroke"' +
+            ' stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round">' + esc(nm) + '</text>');
+          noteBoxes.push(boxOf(x2 - 10, y2 - 7, 20, 10));
+        });
+      });
+    }
+
+    /* viewBox: everything drawn, plus room for the wire lanes and the labels.
        `frame` is the bounding box of the parts alone, without padding or wire
        lanes; the viewBox has to contain it or the drawing is cropped. */
     var xs = [], ys = [];
     var fx0 = Infinity, fy0 = Infinity, fx1 = -Infinity, fy1 = -Infinity;
-    dia.parts.forEach(function (p) {
-      var sz = sizeOf(p);
-      var x0 = p.left, y0 = p.top, x1 = p.left + sz[0], y1 = p.top + sz[1];
-      if (p.rotate) {
-        /* A rotated part sticks out of its unrotated footprint: a servo turned
-           by 11 degrees is 30 units taller than its box, so left/top + size
-           clipped 15 units off the horns at the bottom of the ring. Take the
-           rotated bounding box instead - it is exact, not padding. */
-        var a = p.rotate * Math.PI / 180;
-        var w = Math.abs(sz[0] * Math.cos(a)) + Math.abs(sz[1] * Math.sin(a));
-        var h = Math.abs(sz[0] * Math.sin(a)) + Math.abs(sz[1] * Math.cos(a));
-        var cx = p.left + sz[0] / 2, cy = p.top + sz[1] / 2;
-        x0 = cx - w / 2; x1 = cx + w / 2; y0 = cy - h / 2; y1 = cy + h / 2;
-      }
-      xs.push(x0, x1); ys.push(y0, y1);
-      fx0 = Math.min(fx0, x0); fy0 = Math.min(fy0, y0);
-      fx1 = Math.max(fx1, x1); fy1 = Math.max(fy1, y1);
+    geom.forEach(function (g) {
+      xs.push(g.x0, g.x1); ys.push(g.y0, g.y1);
+      fx0 = Math.min(fx0, g.x0); fy0 = Math.min(fy0, g.y0);
+      fx1 = Math.max(fx1, g.x1); fy1 = Math.max(fy1, g.y1);
     });
-    xs.push(bx0 - 6, bx1 + 6);
-    /* Reserve only the wrap lanes that were actually used. Reserving a fixed
-       five always left a dead band on the side with no wrap, which showed up
-       as a small drawing floating in a tall box. */
-    ys.push(by0 - CLEAR - Math.max(0, router.lanes.top - 1) * LANE,
-            by1 + CLEAR + Math.max(0, router.lanes.bot - 1) * LANE);
+    noteBoxes.forEach(function (b) { xs.push(b[0], b[2]); ys.push(b[1], b[3]); });
+    /* Reserve only the lanes that were actually used. Reserving a fixed five
+       always left a dead band on the side with no wrap, which showed up as a
+       small drawing floating in a tall box. */
+    xs.push(bx0 - GAP - Math.max(0, router.depth.L) * LANE_V,
+            bx1 + GAP + Math.max(0, router.depth.R) * LANE_V);
+    ys.push(by0 - CLEAR - Math.max(0, router.depth.top) * LANE,
+            by1 + CLEAR + Math.max(0, router.depth.bot) * LANE);
     var PAD = 15;
     var vx = Math.min.apply(null, xs) - PAD, vy = Math.min.apply(null, ys) - PAD;
     var vw = Math.max.apply(null, xs) - Math.min.apply(null, xs) + 2 * PAD;
@@ -1626,7 +2230,7 @@ var PcbView = (function () {
       '" fill="#f4f7fc"/>' +
       bodies.join('') +
       '<g class="pcb-wires">' + wires.join('') + '</g>' +
-      '<g class="pcb-labels">' + labels.join('') + '</g>' +
+      '<g class="pcb-labels">' + labels.join('') + notes.join('') + '</g>' +
       '<g class="pcb-hints">' + hot.join('') + '</g>' +
       '</svg>';
 
@@ -1637,7 +2241,8 @@ var PcbView = (function () {
       wires: routed.length,
       parts: dia.parts.length,
       pins: { used: Object.keys(used).length, total: pinNames.length },
-      audit: audit(dia, routed, routeMode)
+      labels: labelled, nonBoardPins: expectedPins,
+      audit: audit(dia, routed, routeMode, router)
     };
   }
 
@@ -1677,7 +2282,7 @@ var PcbView = (function () {
     return true;
   }
 
-  return { render: render, audit: function (d) {
+  return { render: render, isBoard: isBoard, audit: function (d) {
     var dia = typeof d === 'string' ? JSON.parse(d) : JSON.parse(JSON.stringify(d));
     nudge(dia);
     var router = makeRouter(dia, byId(dia)), routed = [];
@@ -1688,7 +2293,7 @@ var PcbView = (function () {
     });
     return audit(dia, routed);
   }, setBrightness: setBrightness, setAngle: setAngle, hornTransform: hornTransform,
-     VERSION: '1.3.0' };
+     VERSION: '1.5.0' };
 })();
 /* === PCB-VIEW END === */
 </script>

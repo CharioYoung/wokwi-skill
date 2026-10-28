@@ -123,17 +123,18 @@ wokwi-cli is headless, does not create web projects, and cannot capture the whol
    ```bash
    node scripts/verify_viewer.js <project-dir>              # code byte-identical to the real files + JS syntax
    node scripts/domrun.js <project-dir>/sim-viewer.html     # fake DOM really runs boot(); error count must be 0
-   node scripts/check_circuit.js <project-dir>              # geometry + pins: crossings must be 0, UNRESOLVED must be 0
+   node scripts/check_circuit.js <project-dir>              # geometry + pins + labels: crossings 0, UNRESOLVED 0, labels complete, shared <= 1%
    ```
 6. Open the preview with `present_files`.
 
-**Five hard rules for the viewer (each learned the hard way — break one and it explodes)**:
+**Six hard rules for the viewer (each learned the hard way — break one and it explodes)**:
 
 1. The `.ino` / `diagram.json` on the page must be the **verbatim source that actually compiled**; not a single function, macro or global may be removed.
 2. **Never carry C/C++ code inside a JS template literal** (`\n` becomes a real newline in JS, and after the user copies it Wokwi reports `missing terminating ' character`). Use a `<script type="text/plain" id="inoSrc">` raw text block instead.
 3. Verification must **simulate how the browser reads the value** (normalise exactly like `rawSrc()` and compare); reading the HTML source directly gives false positives.
 4. When editing an existing page, replace only **the target range** — do not use truncation like `slice(0, lastIndexOf('<script>'))`, which also deletes definitions such as `CFG`, leaving a blank page that no syntax check will catch.
 5. **The circuit must come from `PcbView.render(diagram)`.** A working serial log does not prove the wiring: firmware never checks hardware, and `digitalWrite` to an unconnected pin returns happily. `UNRESOLVED` in `check_circuit.js` is the only evidence that it is wired right.
+6. **The picture must say what each part is and which leg is which, and two unrelated wires may never share a line.** Every non-board part prints its `id` + exact type + every pin name; `labels=` in `check_circuit.js` must equal what `diagram.json` declares and `shared=` must stay at or under 1% (`bus=` is a junction out of one pin — reported only).
 
 Details and counter-examples are in `references/06-viewer.en.md`.
 

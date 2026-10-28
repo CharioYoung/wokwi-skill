@@ -96,7 +96,7 @@ After the fix: `parts=9 wires=18/18 crossings=0 UNRESOLVED=0 pins=38/38`.
 
 - **An ESP32 can drive a servo with no library at all**: `ledcAttach(pin, 50, 16)` and convert `500 + angle*2000/180` µs into a 16-bit duty. One less dependency means the project still compiles when copied somewhere else.
 - **Make the log prove the branch**: print one fixed-format line per state transition, then use `scenario.yaml` to create the trigger. In a headless simulation that is the only assertable evidence you get.
-- **Numbers from the renderer must be challengeable**: `check_circuit.js` counts board-crossing segments (must be 0), hover hotspots vs. total pins (must be equal), and empty `<title>`s (must be 0). Those assertions exist because of failure mode 2 above — nobody noticed, because nothing was asserted.
+- **Numbers from the renderer must be challengeable**: `check_circuit.js` counts board-crossing segments (must be 0), hover hotspots vs. total pins (must be equal), empty `<title>`s (must be 0), **labels** (every non-board part prints its `id`, type and every pin name — the count must equal what `diagram.json` declares) and **shared length** (two unrelated wires drawn on each other must stay at or under 1% of total wire length; a run shared out of the *same* pin is a junction and is reported separately as `bus`). Those assertions exist because of failure mode 2 above — nobody noticed, because nothing was asserted.
 
 ## Verify (all three must be green)
 

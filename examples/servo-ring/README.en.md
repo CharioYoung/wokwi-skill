@@ -80,10 +80,10 @@ The three checks:
 ```
 verify_viewer   INO identical (6628 chars) / DIA identical (10340 chars) / compiles cleanly (.hex, 5416 B)
 domrun          RESULT: OK (0 runtime errors)
-check_circuit   parts=33 wires=98/98 crossings=0 leads=34 pins=85/85 (34 wired)
+check_circuit   parts=33 wires=98/98 crossings=0 leads=60 pins=85/85 (34 wired) labels=32/96 shared=193.5u/0.55% bus=275.4u
 ```
 
-`crossings=0` is the point: not one of the 98 wires runs across the PCB. `leads=34` is allowed - see below.
+`crossings=0` is the point: not one of the 98 wires runs across the PCB. `leads=60` is allowed - see below. `labels=32/96` means all 32 servos and all 96 pins are named (`servo17` / `舵机 · wokwi-servo` / `GND V+ PWM`), so the drawing can be wired from; `shared=0.55%` is the last few shared runs in the densest diagram here (`bus=275.4u` is a run shared out of one pin - a junction, the way a schematic draws a bus, not a defect).
 
 ## The three fixes this case forced out
 

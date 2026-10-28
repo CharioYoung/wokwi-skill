@@ -79,10 +79,10 @@ Global variables use 433 bytes (5%) of dynamic memory, leaving 7759 bytes for lo
 ```
 verify_viewer   INO identical (6628 chars) / DIA identical (10340 chars) / compiles cleanly (.hex, 5416 B)
 domrun          RESULT: OK (0 runtime errors)
-check_circuit   parts=33 wires=98/98 crossings=0 leads=34 pins=85/85 (34 wired)
+check_circuit   parts=33 wires=98/98 crossings=0 leads=60 pins=85/85 (34 wired) labels=32/96 shared=193.5u/0.55% bus=275.4u
 ```
 
-`crossings=0` 是关键：98 条线里没有一条从 PCB 上横穿过去。`leads=34` 是允许的——见下。
+`crossings=0` 是关键：98 条线里没有一条从 PCB 上横穿过去。`leads=60` 是允许的——见下。`labels=32/96` 是 32 个舵机、96 个引脚全都有名有姓（`servo17` / `舵机 · wokwi-servo` / `GND V+ PWM`），照着图就能接线；`shared=0.55%` 是这张最密的图里仅剩的几段共线（`bus=275.4u` 是同一引脚出发的汇合点，像原理图的母线，不算缺陷）。
 
 ## 这个 case 逼出来的三个修复
 
