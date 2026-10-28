@@ -80,6 +80,28 @@ if (fs.existsSync(diaPath)) {
   console.log('[SKIP] no diagram.json');
 }
 
+/* enclosure.json is optional, but the page block must not lie about it.
+ *
+ * A page copied from the template carries the template's sample shell, and an
+ * enclosure the file does not describe is worse than no enclosure: it looks
+ * printable. So: no enclosure.json -> blank the block (the card hides itself);
+ * enclosure.json -> the block is its bytes. */
+const encPath = path.join(dir, 'enclosure.json');
+const hasEncBlock = html.indexOf('<script type="text/plain" id="encSrc">') >= 0;
+if (fs.existsSync(encPath)) {
+  const txt = fs.readFileSync(encPath, 'utf8');
+  try { JSON.parse(txt); } catch (e) {
+    console.log(`[FAIL] enclosure.json is not valid JSON: ${e.message}`);
+    process.exit(1);
+  }
+  if (hasEncBlock) put('encSrc', txt);
+  else console.log('[SKIP] page has no encSrc block - run: node scripts/sync_enclosure.js');
+} else if (hasEncBlock) {
+  put('encSrc', '');
+} else {
+  console.log('[SKIP] no enclosure.json');
+}
+
 if (failed) process.exit(1);
 if (!check) fs.writeFileSync(viewer, html, 'utf8');
 console.log(check ? 'RESULT: OK - page embeds the real files' : 'RESULT: OK');

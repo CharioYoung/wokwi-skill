@@ -137,7 +137,8 @@ wokwi-skill/
 │   ├── 05-build-and-simulate.md #   compiling, simulation flags, ways to observe
 │   ├── 06-viewer.md             #   viewer spec (the hard rules, incl. §3.4 "things not to do")
 │   ├── 07-troubleshooting.md    #   error encyclopaedia (12 real cases)
-│   └── 08-examples.md           #   full walkthrough of the examples
+│   ├── 08-examples.md           #   full walkthrough of the examples
+│   └── 09-enclosure.md          #  3D-printed body: enclosure.json, the fit checks, the STL
 ├── scripts/
 │   ├── check-env.ps1 / .sh      # environment self-check
 │   ├── compile.ps1 / compile.sh # parameterised build (ASCII path avoidance)
@@ -146,7 +147,10 @@ wokwi-skill/
 │   ├── domrun.js                # fake-DOM runtime check (catches undefined crashes)
 │   ├── pcbview.js               # circuit renderer: diagram.json -> real board/pins/wires
 │   ├── sync_pcbview.js          # inline pcbview.js into every page (--check for CI)
-│   └── sync_embed.js            # write the real .ino / diagram.json into a page (--check for CI)
+│   ├── enclosure.js             # enclosure builder + fit checker (enclosure.json -> shells, STL)
+│   ├── check_enclosure.js       # the gate: parts fit / ports reach / every part held / shells closed
+│   ├── sync_enclosure.js        # inline enclosure.js into every page (--check for CI)
+│   └── sync_embed.js            # write the real .ino / diagram.json / enclosure.json into a page (--check for CI)
 ├── assets/
 │   └── viewer-template.html     # config-driven result viewer template
 └── examples/
@@ -154,6 +158,7 @@ wokwi-skill/
     ├── remote-switch/           # WiFi web remote switch + PWM breathing LED (fully runnable, has README.md + README.zh.md)
     ├── servo-ring/              # 32-servo ring on a Mega, 85 pins (complex-project stress test, has README.md + README.zh.md)
     └── duck-robot/              # Duck robot: LED / servo / buzzer / ultrasonic in one sketch (has README.md + README.zh.md)
+                                 #   + enclosure.json: a 96x80x58 duck body that holds all nine parts
 ```
 
 > **Bilingual**: the default `.md` in this repository is English; every one has a `.zh.md` Chinese twin (`README.md` ↔ `README.zh.md`, `references/06-viewer.md` ↔ `references/06-viewer.zh.md`), and each file links to its counterpart at the top via `中文 | English`.

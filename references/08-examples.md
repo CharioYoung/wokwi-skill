@@ -204,6 +204,29 @@ Firmware size: **947,568 bytes** (72% program / 14% RAM).
 
 ---
 
+## Example 3: the printed body (`examples/duck-robot/enclosure.json`)
+
+The duck's circuit is nine parts and twenty-odd wires. Its body is one file of millimetres, and the layout is worth reading as a worked example of the fit checks:
+
+| Decision | Why it is the only one that passes |
+|---|---|
+| the board lies **flat on the floor**, USB end against the front wall | a socket 20 mm inside the box is reported `blocked`: the plug cannot reach it with the lid on |
+| the sonar stands on a **shelf** (`shelves`, top at z=28) | it must face the front wall and clear the board; without the shelf it is `floating` |
+| the two LEDs sit **on top of the sonar** | they look out of 5 mm holes at z=45, and a part 3 mm above the nearest surface is a part that falls out |
+| the servos are turned `x180` so the horns point **down** through the floor | the legs have to be outside; the horn slots are cut in the bottom face automatically |
+| the buzzer stands on the floor front-left, `x90` | `x90` turns its sound port from +z to -y, so the grille faces out instead of into the box |
+
+Run it:
+
+```bash
+node scripts/check_enclosure.js examples/duck-robot --parts
+# [OK] parts=9 shells=7 tris=3104 closed=yes volume=89547mm3 bbox=96x80x63mm ports=8/8 wall=2.4mm
+```
+
+Delete the `shelves` entry and run it again: the sonar becomes `floating` and the exit code goes to 1. That is the difference between a picture of a box and a body that assembles.
+
+---
+
 ## From an example to a new requirement: change only three things
 
 Suppose you want "a button-controlled servo pan mount":

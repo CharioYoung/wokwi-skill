@@ -202,6 +202,29 @@ powershell -File ../../scripts/simulate.ps1 -Project . -Timeout 16000 -Expect "I
 
 ---
 
+## 案例三：真机外壳（`examples/duck-robot/enclosure.json`）
+
+鸭子的电路是 9 颗器件、二十几条线。它的机身是一份毫米文件，里面的每个决定都值得当作装配校验的样例来读：
+
+| 决定 | 为什么只有它能过检 |
+|---|---|
+| 板子**平躺在地板上**，USB 端贴前壁 | 接口埋在箱里 20 mm 会被报 `blocked`：盖上盖子，插头够不到 |
+| 超声波站在**层板**上（`shelves`，上表面 z=28） | 它必须朝前壁、又得躲开板卡；没有层板就是 `floating` |
+| 两颗 LED **坐在超声波顶上** | 它们从 z=45 的 5 mm 孔里看出去，而离最近支撑面 3 mm 的器件会掉 |
+| 舵机 `x180`，舵机角朝**下**穿出底板 | 腿必须在壳外；角槽是在底面自动开出来的 |
+| 蜂鸣器站在地板左前，`x90` | `x90` 把发声口从 +z 转到 -y，栅格朝外而不是朝箱内 |
+
+跑一下：
+
+```bash
+node scripts/check_enclosure.js examples/duck-robot --parts
+# [OK] parts=9 shells=7 tris=3104 closed=yes volume=89547mm3 bbox=96x80x63mm ports=8/8 wall=2.4mm
+```
+
+把 `shelves` 那段删掉再跑一次：超声波变成 `floating`，退出码变 1。这就是"画了个盒子"和"装得起来的机身"的差别。
+
+---
+
 ## 从示例到新需求：只改三处
 
 假设要做一个"按键控制舵机云台"：

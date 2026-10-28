@@ -173,6 +173,41 @@ if (!callsRender) {
   pass('circuit is rendered from diagram.json (PcbView.render + PCB-VIEW block)');
 }
 
+// ------------------------------------------- 1c. enclosure is rendered, not drawn
+/* Same failure as 1b, one layer out: a hand-drawn box with the right number of
+   holes proves nothing about whether the board fits inside it. The page must
+   call the builder, and the builder must be the shared copy. */
+const hasEncData = /<script type="text\/plain" id="encSrc">([\s\S]*?)<\/script>/.exec(html);
+if (hasEncData) {
+  const encTxt = hasEncData[1].trim();
+  console.log('');
+  console.log('--- 1c. enclosure is rendered, not drawn ---');
+  if (encTxt.length > 2) {
+    const callsEnc = /Enclosure\.render\s*\(/.test(html);
+    const hasEncBlock = /=== ENC-VIEW BEGIN/.test(html);
+    if (!callsEnc) {
+      consistencyOk = false;
+      fail('page has an enclosure but never calls Enclosure.render(...) - a hand-drawn box is not a ' +
+        'fit check. Inline scripts/enclosure.js and render the project\'s own enclosure.json.');
+    } else if (!hasEncBlock) {
+      consistencyOk = false;
+      fail('page calls Enclosure.render but has no ENC-VIEW block - copy scripts/enclosure.js in ' +
+        'verbatim (node scripts/sync_enclosure.js) so the builder cannot drift.');
+    } else {
+      pass('enclosure is rendered from enclosure.json (Enclosure.render + ENC-VIEW block)');
+    }
+    try {
+      JSON.parse(encTxt);
+      pass('enclosure block is valid JSON');
+    } catch (e) {
+      consistencyOk = false;
+      fail('enclosure block is not valid JSON: ' + e.message);
+    }
+  } else {
+    pass('no enclosure for this project (block present but empty) - card hides itself');
+  }
+}
+
 // guard against the classic regression: code inside a JS template literal
 if (/const\s+INO\s*=\s*`/.test(html) || /const\s+DIA\s*=\s*`/.test(html)) {
   consistencyOk = false;

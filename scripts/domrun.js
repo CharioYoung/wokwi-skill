@@ -89,7 +89,12 @@ const document = {
   getElementById(id) {
     if (!cache[id]) {
       const el = makeEl('div');
-      if (id === 'inoSrc' || id === 'diaSrc') el._text = rawSrcOf(id);
+      /* Every text/plain data block the page reads through rawSrc() has to
+       * arrive with its content, or the page silently takes a different
+       * branch: an empty enclosure block is indistinguishable from "this
+       * project has no printed body", so the card hides and the run still
+       * reports OK. */
+      if (id === 'inoSrc' || id === 'diaSrc' || id === 'encSrc') el._text = rawSrcOf(id);
       cache[id] = el;
       touched.push(id);
     }
@@ -114,8 +119,12 @@ const sandbox = {
   clearInterval: () => {},
   requestAnimationFrame: (fn) => setTimeout(() => fn(Date.now()), 0),
   cancelAnimationFrame: (id) => clearTimeout(id),
+  /* enclosure.js writes binary STL through typed arrays; a stub DOM that
+   * lacks them can only pass because the export path was never taken. */
+  ArrayBuffer, DataView, Uint8Array, Float32Array, Blob,
+  URL: { createObjectURL: () => 'blob:stub', revokeObjectURL() {} },
   Date, Math, JSON, String, Number, Boolean, Array, Object, Promise, RegExp,
-  parseInt, parseFloat, isNaN,
+  parseInt, parseFloat, isNaN, isFinite,
   performance: { now: () => Date.now() },
 };
 sandbox.globalThis = sandbox;
@@ -136,7 +145,8 @@ setTimeout(() => {
   console.log('');
   console.log('--- elements the page wrote to ---');
 
-  const interesting = touched.filter((id) => id !== 'inoSrc' && id !== 'diaSrc');
+  const DATA_BLOCKS = ['inoSrc', 'diaSrc', 'encSrc'];
+  const interesting = touched.filter((id) => DATA_BLOCKS.indexOf(id) < 0);
   if (interesting.length === 0) {
     console.log('  (none) - the script never touched the DOM?');
   }

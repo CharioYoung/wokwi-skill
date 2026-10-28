@@ -134,9 +134,10 @@ wokwi-skill/
 │   ├── 03-hardware-selection.md #   选型决策树 + 降级策略
 │   ├── 04-diagram-schema.md     #   diagram.json 格式与元件表（写前必读）
 │   ├── 05-build-and-simulate.md #   编译、仿真参数、观测手段
-│   ├── 06-viewer.md             #   结果查看器规范（六条铁律）
+│   ├── 06-viewer.md             #   结果查看器规范（七条铁律）
 │   ├── 07-troubleshooting.md    #   错误百科（12 个真实案例）
-│   └── 08-examples.md           #   完整案例讲解
+│   ├── 08-examples.md           #   完整案例讲解
+│   └── 09-enclosure.md          #   3D 打印外壳：enclosure.json、装配校验、STL
 ├── scripts/
 │   ├── check-env.ps1 / .sh      # 环境自检
 │   ├── compile.ps1 / compile.sh # 参数化编译（ASCII 路径规避）
@@ -145,7 +146,10 @@ wokwi-skill/
 │   ├── domrun.js                # 假 DOM 运行时校验（抓 undefined 崩）
 │   ├── pcbview.js               # 电路渲染器：diagram.json → 真实板卡/引脚/连线
 │   ├── sync_pcbview.js          # 把 pcbview.js 内联进所有页面（--check 供 CI）
-│   └── sync_embed.js            # 把真实 .ino / diagram.json 写进页面（--check 供 CI）
+│   ├── enclosure.js             # 外壳构建 + 装配校验（enclosure.json → 闭合壳 / STL）
+│   ├── check_enclosure.js       # 闸门：器件装得下 / 接口通到外面 / 器件有支撑 / 壳闭合
+│   ├── sync_enclosure.js        # 把 enclosure.js 内联进所有页面（--check 供 CI）
+│   └── sync_embed.js            # 把真实 .ino / diagram.json / enclosure.json 写进页面（--check 供 CI）
 ├── assets/
 │   └── viewer-template.html     # 配置驱动的结果查看器模板
 └── examples/
@@ -153,6 +157,7 @@ wokwi-skill/
     ├── remote-switch/           # WiFi 网页远程开关 + PWM 呼吸灯（全套可跑，含 README.md / README.zh.md）
     ├── servo-ring/              # 32 舵机环形阵列 + Mega 85 脚（复杂工程压测，含 README.md / README.zh.md）
     └── duck-robot/              # 小鸭机器人：LED/舵机/蜂鸣器/超声波 4 类外设（含 README.md / README.zh.md）
+                                 #   + enclosure.json：96×80×58 的鸭子机身，装下全部 9 颗器件
 ```
 
 > **双语说明**：仓库默认 `.md` 为英文，每篇都有同名的 `.zh.md` 中文版（`README.md` ↔ `README.zh.md`、`references/06-viewer.md` ↔ `references/06-viewer.zh.md`），每篇顶部有 `中文 | English` 互链。

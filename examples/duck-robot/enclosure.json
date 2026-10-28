@@ -1,0 +1,44 @@
+{
+  "_comment": "Physical layout, in millimetres. diagram.json says what is connected; this file says where it physically sits. check_enclosure.js refuses to pass until every part has room, every port can see out, every part is actually held, and every shell is closed.",
+  "printer": { "bed": [220, 220], "layer": 0.2, "minWall": 0.8 },
+  "base": { "w": 96, "d": 80, "h": 58, "wall": 2.4, "floor": 2.0, "fit": 0.4 },
+  "lid": { "on": true, "thick": 2.4, "lip": 3.0, "lipWall": 2.0 },
+  "style": { "color": "#f4c542", "accent": "#f59e0b" },
+  "margin": 0.4,
+  "reach": 8,
+
+  "parts": [
+    { "id": "esp", "at": [20, 2.8, 2], "rot": 0,
+      "_why": "lying flat on the floor, USB end against the front wall - the socket has to stay reachable with the lid on" },
+    { "id": "hc", "at": [20, 2.8, 28], "rot": 0,
+      "_why": "the beak, standing on the shelf below: both transducers are flush with the front wall" },
+    { "id": "eyeL", "at": [22, 2.8, 43], "rot": "x90",
+      "_why": "sitting on top of the beak, lens turned from +z to -y so it looks forward through the wall" },
+    { "id": "eyeR", "at": [60, 2.8, 43], "rot": "x90" },
+    { "id": "buzz", "at": [4, 2.8, 2], "rot": "x90",
+      "_why": "the voice, on the floor at the front-left: x90 turns the sound port to -y" },
+    { "id": "legL", "at": [3, 62, 2], "rot": "x180",
+      "_why": "x180 points the horn down, out through a slot in the floor" },
+    { "id": "legR", "at": [60, 62, 2], "rot": "x180" },
+    { "id": "rL", "at": [66, 30, 2], "rot": 0, "_why": "flat on the floor, right side" },
+    { "id": "rR", "at": [66, 36, 2], "rot": 0 }
+  ],
+
+  "shelves": [
+    { "id": "beak", "at": [14, 2.4], "size": [56, 32], "z": 28, "thick": 2.4,
+      "_why": "holds the sonar at eye height. Without it the beak is drawn in mid-air: it has to face the front wall, and it cannot stand on the floor and still clear the board" }
+  ],
+
+  "bosses": [
+    { "at": [6, 40], "d": 6.5, "hole": 3.2, "_why": "front-left, behind the buzzer and left of the board" },
+    { "at": [52, 44], "d": 6.5, "hole": 3.2, "_why": "right of the board, behind the beak shelf" },
+    { "at": [89, 55], "d": 6.5, "hole": 3.2, "_why": "back-right corner" },
+    { "at": [39, 72], "d": 6.5, "hole": 3.2, "_why": "back-centre, between the two legs" }
+  ],
+
+  "cutouts": [
+    { "id": "vents", "face": "-y", "rect": [72, 40, 76, 52] },
+    { "id": "vents2", "face": "-y", "rect": [78, 40, 82, 52] },
+    { "id": "vents3", "face": "-y", "rect": [84, 40, 88, 52] }
+  ]
+}

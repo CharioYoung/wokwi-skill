@@ -118,6 +118,14 @@ wokwi-cli 无头、不建网页工程、截不到全景。让用户"看到并操
    ```
 4. **电路图禁止手绘，只能渲染**：页面里的 PCB-VIEW 块直接解析 `diagram.json` 渲染真实板卡/引脚/连线，支持 LED 亮度驱动、点灯切换、悬停看连线。要改渲染器只改 `scripts/pcbview.js`，再 `node scripts/sync_pcbview.js` 同步。
 
+4b. **只要项目要有壳，就得有 `enclosure.json`**（见 `references/09-enclosure.zh.md`）。`diagram.json` 没有物理尺度：板子实际坐在哪、盖上盖子 USB 还插不插得进、超声波底下有没有东西托着，它一概答不了。用毫米写 `enclosure.json`，然后：
+   ```bash
+   node scripts/check_enclosure.js <项目目录> --parts   # 每颗器件的真实盒子 + 每一条打不出来的理由
+   node scripts/sync_embed.js <项目目录>                # enclosure.json → 页面的 encSrc 块
+   node scripts/sync_enclosure.js                       # enclosure.js → 所有页面
+   ```
+   页面会多出一张卡片：**外观 / 剖视 / 爆炸 / 下载 .stl**，全部由这一份文件渲染，校验结论直接印在卡片上。没有机身（面包板项目、裸机架）就留空——卡片自动隐藏，`sync_embed.js` 会把数据块清空，别的项目的盒子不会漏进来。
+
    > 画一只鸭子、一个灰盒子、三颗灯泡都不算电路 —— 读者看不到哪个引脚连到哪，而且手绘图会**掩盖坏掉的 `diagram.json`**（引脚名写错时渲染器会跳过那条线，手绘图照样画得漂亮）。`verify_viewer.js` 会在页面找不到 `PcbView.render(` 时直接失败。
 5. **必须做三重校验**：
    ```bash
@@ -127,7 +135,7 @@ wokwi-cli 无头、不建网页工程、截不到全景。让用户"看到并操
    ```
 6. 用 `present_files` 弹出预览。
 
-**查看器六条铁律（血泪换来的，违反必炸）**：
+**查看器七条铁律（血泪换来的，违反必炸）**：
 
 1. 页面里的 `.ino` / `diagram.json` 必须是**实际编译通过的原文**，函数/宏/全局变量一个都不能删。
 2. **绝不能用 JS 模板字符串承载 C/C++ 代码**（`\n` 会被 JS 解释成真换行，用户复制后 Wokwi 报 `missing terminating ' character`）。必须用 `<script type="text/plain" id="inoSrc">` 原始文本块。
@@ -135,6 +143,8 @@ wokwi-cli 无头、不建网页工程、截不到全景。让用户"看到并操
 4. 改已有页面只能替换**目标区间**，不要用 `slice(0, lastIndexOf('<script>'))` 这类截断写法——会连带删掉 `CFG` 等定义，页面白屏且语法检查查不出来。
 5. **电路图只能由 `PcbView.render(diagram)` 生成**。串口跑通不代表接线对：固件不检查硬件，`digitalWrite` 打在没接灯的脚上照样返回。`check_circuit.js` 的 `UNRESOLVED` 才是接线对不对的唯一证据。
 6. **图上必须能读出"这是什么、哪只脚"，且两根不相干的线不许压在一起**。非主器件要印 `id` + 精确型号 + 每个引脚名；`check_circuit.js` 的 `labels=` 必须等于 `diagram.json` 的声明值、`shared=` 必须 ≤ 1%（`bus=` 是同引脚汇合，只报告）。
+
+7. **外壳卡片只能由 `enclosure.json` 渲染，不许手绘，且必须显示校验结论**。手画一个孔数刚好的盒子，证明不了板子装得进去；页面带了外壳却不调用 `Enclosure.render(`，`verify_viewer.js` 直接失败。`problems` 非空时，元数据行不许写"全部落位、互不干涉"。
 
 细节与反例见 `references/06-viewer.zh.md`。
 

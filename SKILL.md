@@ -118,6 +118,14 @@ wokwi-cli is headless, does not create web projects, and cannot capture the whol
    ```
 4. **Never draw the circuit - render it**: the PCB-VIEW block parses `diagram.json` and renders the real board, pins and wires, with LED brightness driven by page state, click-to-switch, and hover-to-identify wires. To change the renderer, edit `scripts/pcbview.js` and run `node scripts/sync_pcbview.js`.
 
+4b. **If the project gets a body, it gets `enclosure.json`** (see `references/09-enclosure.md`). `diagram.json` has no physical scale, so where the board actually sits, whether the USB plug reaches with the lid on, and whether the sonar is standing on anything are all unknowable from it. Write `enclosure.json` in millimetres, then:
+   ```bash
+   node scripts/check_enclosure.js <project-dir> --parts   # every part's real box, and every reason it cannot print
+   node scripts/sync_embed.js <project-dir>                # enclosure.json -> the page's encSrc block
+   node scripts/sync_enclosure.js                          # enclosure.js -> every page
+   ```
+   The page then grows a card with **外观 / 剖视 / 爆炸 / 下载 .stl**, all rendered from that one file, with the checker's findings printed on the card. No body (breadboard project, bare frame)? Leave the block empty — the card hides itself, and `sync_embed.js` blanks it so another project's box cannot leak in.
+
    > A duck, a grey box or three bulbs is not a circuit: the reader cannot see which pin goes where, and a drawing **hides a broken `diagram.json`** (a wrong pin name makes the renderer skip that wire; a drawing shows it anyway). `verify_viewer.js` fails when the page never calls `PcbView.render(`.
 5. **Three checks are mandatory**:
    ```bash
@@ -127,7 +135,7 @@ wokwi-cli is headless, does not create web projects, and cannot capture the whol
    ```
 6. Open the preview with `present_files`.
 
-**Six hard rules for the viewer (each learned the hard way — break one and it explodes)**:
+**Seven hard rules for the viewer (each learned the hard way — break one and it explodes)**:
 
 1. The `.ino` / `diagram.json` on the page must be the **verbatim source that actually compiled**; not a single function, macro or global may be removed.
 2. **Never carry C/C++ code inside a JS template literal** (`\n` becomes a real newline in JS, and after the user copies it Wokwi reports `missing terminating ' character`). Use a `<script type="text/plain" id="inoSrc">` raw text block instead.
@@ -135,6 +143,8 @@ wokwi-cli is headless, does not create web projects, and cannot capture the whol
 4. When editing an existing page, replace only **the target range** — do not use truncation like `slice(0, lastIndexOf('<script>'))`, which also deletes definitions such as `CFG`, leaving a blank page that no syntax check will catch.
 5. **The circuit must come from `PcbView.render(diagram)`.** A working serial log does not prove the wiring: firmware never checks hardware, and `digitalWrite` to an unconnected pin returns happily. `UNRESOLVED` in `check_circuit.js` is the only evidence that it is wired right.
 6. **The picture must say what each part is and which leg is which, and two unrelated wires may never share a line.** Every non-board part prints its `id` + exact type + every pin name; `labels=` in `check_circuit.js` must equal what `diagram.json` declares and `shared=` must stay at or under 1% (`bus=` is a junction out of one pin — reported only).
+
+7. **The enclosure card must be rendered from `enclosure.json`, never drawn, and it must show the checker's verdict.** A hand-drawn box with the right number of holes says nothing about whether the board fits; `verify_viewer.js` fails a page that carries an enclosure without calling `Enclosure.render(`. The card's metadata line must not claim "all placed, no interference" while `problems` is non-empty.
 
 Details and counter-examples are in `references/06-viewer.md`.
 
@@ -176,7 +186,8 @@ When the user is unhappy, iterate in this order — `selection → wiring → co
 | `references/05-build-and-simulate.md` | Build failures, simulation flags, ways to observe |
 | `references/06-viewer.md` | Generating or editing `sim-viewer.html` |
 | `references/07-troubleshooting.md` | First place to look for any error |
-| `references/08-examples.md` | Want to see the three complete worked examples |
+| `references/08-examples.md` | Want to see the four complete worked examples |
+| `references/09-enclosure.md` | Giving the project a 3D-printed body: `enclosure.json`, the fit checks, the STL |
 
 Runnable projects included: `examples/traffic-light/` (pure GPIO state machine), `examples/remote-switch/` (WiFi + HTTP + PWM), `examples/servo-ring/` (Mega + 32 servos + 98 wires, a complex-project stress test), `examples/duck-robot/` (LED/servo/buzzer/ultrasonic together, plus scenario injection).
 

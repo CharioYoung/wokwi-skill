@@ -1,0 +1,33 @@
+{
+  "_comment": "Physical layout, in millimetres. diagram.json says what is connected; this file says where it physically sits. check_enclosure.js refuses to pass until every part has room, every port can see out, and every shell is closed.",
+  "printer": { "bed": [220, 220], "layer": 0.2, "minWall": 0.8 },
+  "base": { "w": 52, "d": 72, "h": 30, "wall": 2.4, "floor": 2.0, "fit": 0.4 },
+  "lid": { "on": true, "thick": 2.4, "lip": 3.0, "lipWall": 2.0 },
+  "style": { "color": "#f8fafc", "accent": "#e2e8f0" },
+  "margin": 0.4,
+  "reach": 8,
+
+  "parts": [
+    { "id": "esp", "at": [12, 14, 2], "rot": 180,
+      "_why": "rot 180 puts the USB socket on the BACK wall, 0.6 mm away from it, so the front wall is free for the three lamps and the cable leaves away from the light" },
+    { "id": "red", "at": [10, 4, 8], "rot": "x90",
+      "_why": "x90 turns the lens from +z to -y: the LED looks out of the front wall" },
+    { "id": "yellow", "at": [22, 4, 8], "rot": "x90" },
+    { "id": "green", "at": [34, 4, 8], "rot": "x90" },
+    { "id": "rr", "at": [10, 4, 2], "rot": 0, "_why": "on the floor, under the lamps - the LED bodies start at z=8" },
+    { "id": "ry", "at": [10, 7, 2], "rot": 0 },
+    { "id": "rg", "at": [10, 10, 2], "rot": 0 }
+  ],
+
+  "bosses": [
+    { "at": [5, 5], "d": 5.6, "hole": 2.8, "_why": "M2.5 screws: the wall is only 2.4 mm, an M3 head would overhang" },
+    { "at": [47, 5], "d": 5.6, "hole": 2.8 },
+    { "at": [5, 68], "d": 5.6, "hole": 2.8 },
+    { "at": [47, 68], "d": 5.6, "hole": 2.8 }
+  ],
+
+  "cutouts": [
+    { "id": "vents", "face": "back", "rect": [44, 18, 48, 27] },
+    { "id": "vents2", "face": "back", "rect": [4, 18, 8, 27] }
+  ]
+}
