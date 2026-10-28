@@ -1,44 +1,82 @@
 {
-  "_comment": "Physical layout, in millimetres. diagram.json says what is connected; this file says where it physically sits. check_enclosure.js refuses to pass until every part has room, every port can see out, every part is actually held, and every shell is closed.",
+  "_comment": "Physical layout, in millimetres. diagram.json says what is connected; this file says where it physically sits, and form says what the shell is made of. A duck, not a box: a plump egg body, a round head raised at the front, a broad flat orange bill, eyes above it, folded wings on the flanks, a tail at the back and webbed feet under the bill. The dome's footprint matches the body at the parting line, so there is no flat ledge ringing the top (that ledge was what made earlier versions read as a tray). The SDF is the single source of truth; manifold-3d only meshes it for the preview.",
   "printer": { "bed": [220, 220], "layer": 0.2, "minWall": 0.8 },
-  "base": { "w": 96, "d": 80, "h": 58, "wall": 2.4, "floor": 2.0, "fit": 0.4 },
-  "lid": { "on": true, "thick": 2.4, "lip": 3.0, "lipWall": 2.0 },
-  "style": { "color": "#f4c542", "accent": "#f59e0b" },
+  "base": { "w": 100, "d": 84, "h": 44, "wall": 2.4, "floor": 2.0, "fit": 0.4 },
+
+  "form": {
+    "round": 20,
+    "roundZ": 3,
+    "roundZBottom": 14,
+    "overhang": 22,
+    "head": {
+      "div": 26,
+      "flangeBlend": 12,
+      "rim": 3,
+      "blobs": [
+        { "kind": "ellipsoid", "at": [50, 42, 28], "size": [49.8, 41.8, 38], "blend": 14,
+          "_why": "the body: an egg whose equator sits a little above the parting line, so at z=26 it is just inside the base footprint (no ledge, no overhang) and the two shells meet flush. The low equator keeps the chest full height where the sonar lives." },
+        { "kind": "ellipsoid", "at": [50, 18, 57], "size": [18, 16, 16], "blend": 13,
+          "_why": "the head: a round ball sitting on the front of the body, the way a rubber duck is built - body egg, then head ball, then bill" }
+      ],
+      "cav": { "at": [50, 15, 44], "size": [36, 19, 20], "round": 6,
+        "_why": "a square hollow at the chest so the 45x20x15 sonar fits on its shelf without the belly curve stealing room" }
+    },
+    "features": [
+      { "kind": "ellipsoid", "op": "add", "on": "head", "at": [50, -6, 51], "size": [16, 12, 6], "blend": 8, "_why": "the bill: a broad flat paddle on the front of the head, orange, protruding forward" },
+      { "kind": "sphere", "op": "add", "on": "head", "at": [41, 5, 61], "r": 4.5, "blend": 3, "_why": "left eye, above the bill, welded to the face" },
+      { "kind": "sphere", "op": "add", "on": "head", "at": [59, 5, 61], "r": 4.5, "blend": 3, "_why": "right eye" },
+      { "kind": "ellipsoid", "op": "add", "on": "head", "at": [50, 80, 36], "size": [11, 14, 13], "blend": 8, "_why": "tail: a short up-tilted wedge at the back" },
+      { "kind": "ellipsoid", "op": "add", "at": [0, 44, 22], "size": [5, 28, 12], "blend": 8, "_why": "left wing, a flat ridge folded along the body side" },
+      { "kind": "ellipsoid", "op": "add", "at": [100, 44, 22], "size": [5, 28, 12], "blend": 8, "_why": "right wing" },
+      { "kind": "ellipsoid", "op": "add", "at": [38, 6, 4], "size": [16, 14, 4], "blend": 3, "_why": "left webbed foot, orange, flat at the bottom front, kept on the bed" },
+      { "kind": "ellipsoid", "op": "add", "at": [62, 6, 4], "size": [16, 14, 4], "blend": 3, "_why": "right webbed foot" }
+    ]
+  },
+
+  "style": {
+    "color": "#f4c542",
+    "accent": "#f0851f",
+    "paint": [
+      { "box": [34, -18, 44, 66, 7, 58], "color": "#f0851f", "_why": "the bill, in bill colour" },
+      { "box": [22, -9, -1, 78, 21, 8], "color": "#e8781c", "_why": "the webbed feet, orange" },
+      { "sphere": [41, 3, 61, 4.7], "color": "#17191d", "_why": "left eye" },
+      { "sphere": [59, 3, 61, 4.7], "color": "#17191d", "_why": "right eye" }
+    ]
+  },
   "margin": 0.4,
   "reach": 8,
 
   "parts": [
-    { "id": "esp", "at": [20, 2.8, 2], "rot": 0,
-      "_why": "lying flat on the floor, USB end against the front wall - the socket has to stay reachable with the lid on" },
-    { "id": "hc", "at": [20, 2.8, 28], "rot": 0,
-      "_why": "the beak, standing on the shelf below: both transducers are flush with the front wall" },
-    { "id": "eyeL", "at": [22, 2.8, 43], "rot": "x90",
-      "_why": "sitting on top of the beak, lens turned from +z to -y so it looks forward through the wall" },
-    { "id": "eyeR", "at": [60, 2.8, 43], "rot": "x90" },
-    { "id": "buzz", "at": [4, 2.8, 2], "rot": "x90",
-      "_why": "the voice, on the floor at the front-left: x90 turns the sound port to -y" },
-    { "id": "legL", "at": [3, 62, 2], "rot": "x180",
+    { "id": "esp", "at": [24, 2.8, 2], "rot": 0,
+      "_why": "lying flat on the floor, USB end against the front wall" },
+    { "id": "hc", "at": [27.5, 12, 26], "rot": 0,
+      "_why": "the bill, standing on the shelf at chest height: far enough back that its 45 mm width is inside the body's full width, looking forward through the cut-outs" },
+    { "id": "eyeL", "at": [44.5, 12, 41], "rot": "x90",
+      "_why": "rests on top of the sonar, lens turned from +z to -y so it looks forward" },
+    { "id": "eyeR", "at": [55.5, 12, 41], "rot": "x90" },
+    { "id": "buzz", "at": [10, 42, 2], "rot": "x90",
+      "_why": "the voice, on the floor in the left strip, clear of the rounded corners" },
+    { "id": "legL", "at": [26, 60, 2], "rot": "x180",
       "_why": "x180 points the horn down, out through a slot in the floor" },
-    { "id": "legR", "at": [60, 62, 2], "rot": "x180" },
-    { "id": "rL", "at": [66, 30, 2], "rot": 0, "_why": "flat on the floor, right side" },
-    { "id": "rR", "at": [66, 36, 2], "rot": 0 }
+    { "id": "legR", "at": [60, 60, 2], "rot": "x180" },
+    { "id": "rL", "at": [70, 30, 2], "rot": 0, "_why": "flat on the floor, right side" },
+    { "id": "rR", "at": [70, 36, 2], "rot": 0 }
   ],
 
   "shelves": [
-    { "id": "beak", "at": [14, 2.4], "size": [56, 32], "z": 28, "thick": 2.4,
-      "_why": "holds the sonar at eye height. Without it the beak is drawn in mid-air: it has to face the front wall, and it cannot stand on the floor and still clear the board" }
+    { "id": "bill", "on": "head", "at": [14, 2.4], "size": [72, 32], "z": 26, "thick": 2.4,
+      "_why": "holds the sonar at bill height, facing the front wall" }
   ],
 
   "bosses": [
-    { "at": [6, 40], "d": 6.5, "hole": 3.2, "_why": "front-left, behind the buzzer and left of the board" },
-    { "at": [52, 44], "d": 6.5, "hole": 3.2, "_why": "right of the board, behind the beak shelf" },
-    { "at": [89, 55], "d": 6.5, "hole": 3.2, "_why": "back-right corner" },
-    { "at": [39, 72], "d": 6.5, "hole": 3.2, "_why": "back-centre, between the two legs" }
+    { "at": [16, 22], "d": 6.5, "hole": 3.2, "_why": "front-left" },
+    { "at": [16, 60], "d": 6.5, "hole": 3.2, "_why": "back-left" },
+    { "at": [84, 22], "d": 6.5, "hole": 3.2, "_why": "front-right" },
+    { "at": [88, 40], "d": 6.5, "hole": 3.2, "_why": "back-right, clear of the right servo" }
   ],
 
   "cutouts": [
-    { "id": "vents", "face": "-y", "rect": [72, 40, 76, 52] },
-    { "id": "vents2", "face": "-y", "rect": [78, 40, 82, 52] },
-    { "id": "vents3", "face": "-y", "rect": [84, 40, 88, 52] }
+    { "id": "vent1", "face": "-y", "rect": [50, 4, 54, 16], "bars": [8, 12], "barT": 0.8 },
+    { "id": "vent2", "face": "-y", "rect": [56, 4, 60, 16], "bars": [8, 12], "barT": 0.8 }
   ]
 }

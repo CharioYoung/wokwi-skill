@@ -2,6 +2,7 @@
   "_comment": "Physical layout, in millimetres. diagram.json says what is connected; this file says where it physically sits. check_enclosure.js refuses to pass until every part has room, every port can see out, and every shell is closed.",
   "printer": { "bed": [220, 220], "layer": 0.2, "minWall": 0.8 },
   "base": { "w": 44, "d": 72, "h": 30, "wall": 2.4, "floor": 2.0, "fit": 0.4 },
+  "form": { "round": 8, "roundZ": 6, "roundZBottom": 3 },
   "lid": { "on": true, "thick": 2.4, "lip": 3.0, "lipWall": 2.0 },
   "style": { "color": "#eef2f7", "accent": "#cbd5e1" },
   "margin": 0.4,

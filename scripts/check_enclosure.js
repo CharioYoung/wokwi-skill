@@ -3,29 +3,28 @@
  * check_enclosure.js - prove the printable shell actually fits the parts.
  *
  * Why this exists:
- *   enclosure.js can build a shell for any numbers you give it, and the
- *   picture always looks like a box. What the picture cannot show you is
- *   whether the shell is 2 mm too narrow for the board, whether the USB hole
- *   lines up with the socket, whether a face failed to triangulate, or whether
- *   a wall is thinner than one nozzle pass. Each of those is a failed print
- *   and a wasted afternoon, so they are checked here and turned into an exit
- *   code.
+ *   enclosure.js can generate a shell for any numbers you give it, and a
+ *   render always looks plausible. What a picture cannot tell you is whether
+ *   the shell is 2 mm too narrow for the board, whether the USB hole lines up
+ *   with the socket, whether the isosurface came out watertight, or whether a
+ *   wall is thinner than one nozzle pass. Each of those is a failed print, so
+ *   they are checked here and turned into an exit code.
  *
  * What it reports, per project:
  *   parts    every part in diagram.json has a position, and no two overlap
- *   shells   base + lid + bosses, each a closed manifold with positive volume
- *   volume   mm^3 of the assembled shell, and the bounding box in mm
- *   ports    how many connectors have a hole they can actually reach / total
- *            (a port facing solid plastic is decoration, not a hole)
- *   bed      the footprint must fit the printer bed
+ *   shells   base + head, each extracted from the field and checked watertight
+ *   volume   mm^3 of the printed shells, and the bounding box in mm
+ *   holes    every opening that the field actually punched through
+ *   wall     the thinnest wall in the file, against the printer minimum
  *
  * Usage:
- *   node check_enclosure.js                  # every project under examples/
+ *   node check_enclosure.js                    # every project under examples/
  *   node check_enclosure.js examples/duck-robot
- *   node check_enclosure.js --parts          # also list every part's assumed size
+ *   node check_enclosure.js --parts            # list every part's assumed size
+ *   node check_enclosure.js --quick            # skip the mesh (field checks only)
  *
- * Exit code: 0 = clean, 1 = a shell is open, a part has no room, two parts
- *            share space, a port faces a wall, or a wall is too thin.
+ * Exit code: 0 = clean, 1 = a shell leaks, a part has no room, two parts share
+ *            space, a hole is blind, or a wall is too thin.
  */
 
 const fs = require('fs');
@@ -35,7 +34,11 @@ const vm = require('vm');
 const ROOT = path.resolve(__dirname, '..');
 
 function loadEnclosure() {
-  const ctx = { console, JSON, Math, String, Number, Object, Array, parseFloat, parseInt, isFinite, isNaN };
+  const ctx = {
+    console, JSON, Math, String, Number, Object, Array, Boolean,
+    parseFloat, parseInt, isFinite, isNaN,
+    Float32Array, Uint8Array, Uint8ClampedArray, ArrayBuffer, DataView
+  };
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'enclosure.js'), 'utf8'), ctx, { filename: 'enclosure.js' });
   if (!ctx.Enclosure) throw new Error('enclosure.js did not define Enclosure');
@@ -44,6 +47,7 @@ function loadEnclosure() {
 
 const argv = process.argv.slice(2);
 const showParts = argv.includes('--parts');
+const quick = argv.includes('--quick');
 
 function findProjects() {
   const given = argv.filter((a) => !a.startsWith('-'));
@@ -75,8 +79,8 @@ for (const dir of projects) {
   const diaPath = path.join(dir, 'diagram.json');
 
   if (!fs.existsSync(encPath)) {
-    /* A project without a body is not wrong - it is a circuit that nobody has
-       put in a box yet. Say so out loud; a silent skip reads like a pass. */
+    /* A project without a body is not wrong - it is a circuit nobody has put
+       in a box yet. Say so out loud; a silent skip reads like a pass. */
     console.log(`  [SKIP] ${label}: no enclosure.json (circuit only, no printed body)`);
     continue;
   }
@@ -108,39 +112,50 @@ for (const dir of projects) {
 
   checked++;
   const s = m.stats;
-  const ports = m.gaps;
-  const cut = ports.filter((g) => g.cut && !g.blocked).length;
-  const blocked = ports.filter((g) => g.blocked).length;
-  const ok = m.problems.length === 0;
+  const blind = m.problems.filter((p) => p.k === 'hole').length;
+
+  let tris = 0, open = 0, volume = 0;
+  if (!quick) {
+    const bb = [-2, -2, -2, m.sdf.W + 2, m.sdf.D + 2, m.sdf.topZ + 2];
+    const base = Enclosure.mesh(m.sdf.baseMap, bb, 1.4);
+    tris += base.tris.length;
+    open += Enclosure.openEdges(base);
+    volume += Enclosure.volumeOf(base);
+    if (m.sdf.hasHead) {
+      const head = Enclosure.mesh(m.sdf.headMap, bb, 1.4);
+      tris += head.tris.length;
+      open += Enclosure.openEdges(head);
+      volume += Enclosure.volumeOf(head);
+    }
+  }
+
+  const ok = m.problems.length === 0 && open === 0;
 
   console.log(
     `  ${ok ? '[OK]  ' : '[FAIL]'} ${label}:` +
-      ` parts=${m.parts.length}` +
-      ` shells=${s.shells}` +
-      ` tris=${s.tris}` +
-      ` closed=${s.closed ? 'yes' : 'NO'}` +
-      ` volume=${Math.round(s.volume)}mm3` +
-      ` bbox=${s.bbox.map((n) => Math.round(n)).join('×')}mm` +
-      ` ports=${cut}/${ports.length}` +
-      (blocked ? ` ${blocked} unreachable` : '') +
-      ` wall=${m.enc.base.wall}mm` +
-      (s.lid ? ` lid=${m.enc.lid.thick}+${m.enc.lid.lip}mm` : ' lid=off')
+    ` parts=${m.parts.length}` +
+    ` shells=${s.shells}` +
+    (quick ? '' : ` tris=${tris} closed=${open === 0 ? 'yes' : 'NO(' + open + ')'} volume=${Math.round(volume)}mm3`) +
+    ` bbox=${m.sdf.W}×${m.sdf.D}×${Math.round(m.sdf.topZ)}mm` +
+    ` holes=${m.holes.length}` +
+    (blind ? ` ${blind} blind` : '') +
+    ` wall=${s.wall}mm` +
+    (m.sdf.hasHead ? ` head=z${m.sdf.zDiv}` : ' head=off')
   );
 
   for (const p of m.problems) console.log(`         [${p.k}] ${p.msg}`);
-  for (const w of m.warns) console.log(`         [warn] ${w}`);
+  for (const w of m.warns) console.log(`         [warn] ${w.msg || w}`);
 
   if (showParts) {
     for (const p of m.parts) {
       const b = p.box;
       console.log(
-        `         ${p.id.padEnd(8)} ${String(p.type).padEnd(26)}` +
-          ` ${p.size.map((n) => n.toFixed(1)).join('×').padEnd(16)}` +
-          ` at [${p.at.map((n) => n.toFixed(1)).join(', ')}]` +
-          ` rot ${JSON.stringify(p.rot)}` +
-          ` box [${b.x0.toFixed(1)},${b.y0.toFixed(1)},${b.z0.toFixed(1)}]..` +
-          `[${b.x1.toFixed(1)},${b.y1.toFixed(1)},${b.z1.toFixed(1)}]` +
-          (p.known ? '' : '  ASSUMED')
+        `         ${String(p.id).padEnd(8)} ${String(p.type).padEnd(26)}` +
+        ` ${p.size.map((n) => n.toFixed(1)).join('×').padEnd(16)}` +
+        ` rot ${JSON.stringify(p.rot)}` +
+        ` box [${b.x0.toFixed(1)},${b.y0.toFixed(1)},${b.z0.toFixed(1)}]..` +
+        `[${b.x1.toFixed(1)},${b.y1.toFixed(1)},${b.z1.toFixed(1)}]` +
+        (p.known ? '' : '  ASSUMED')
       );
     }
   }
@@ -150,9 +165,9 @@ for (const dir of projects) {
 
 console.log('');
 if (bad) {
-  console.log(`RESULT: FAILED - ${bad} project(s). An open shell, a part with no room, or a`);
-  console.log('        port facing solid plastic is a print that fails on the bed, not a');
-  console.log('        cosmetic bug: fix enclosure.json and run this again.');
+  console.log(`RESULT: FAILED - ${bad} project(s). A leaking shell, a part with no room, or a`);
+  console.log('        blind hole is a print that fails on the bed, not a cosmetic bug:');
+  console.log('        fix enclosure.json and run this again.');
   process.exit(1);
 }
 console.log(`RESULT: OK - ${checked} enclosure(s) close, fit, and print`);

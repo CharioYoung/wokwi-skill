@@ -3,9 +3,9 @@
  *
  * Why this exists:
  *   A circuit that runs in the simulator still has no body. The gap between
- *   "the LED blinks" and "I can put it on a shelf" is a box that holds the
+ *   "the LED blinks" and "I can put it on a shelf" is a shell that holds the
  *   parts at the right distance, opens where the connectors are, and prints
- *   without supports. That box is geometry, and geometry can be generated
+ *   without supports. That shell is geometry, and geometry can be generated
  *   from the same part list the circuit already has.
  *
  * The one thing this file cannot do:
@@ -13,41 +13,48 @@
  *   not millimetres. Nothing in it says how big a servo is. So the physical
  *   layout lives in a second file, enclosure.json, and the value of this
  *   module is that it CHECKS the two against each other: every part present,
- *   nothing interpenetrating, every port reachable, walls printable. A box
- *   that is 5 mm too small is a failed print, not a cosmetic bug.
+ *   nothing interpenetrating, every port reachable, walls printable.
+ *
+ * Representation (v2):
+ *   Everything here is a signed distance field, not a triangle soup. That is
+ *   what makes rounded corners, fillets and smooth blends expressible in one
+ *   line each - a corner radius is a parameter, a fillet is an `smin`, a hole
+ *   is a subtraction. Two consumers read the same field:
+ *     - paint()  raymarches it into pixels for the preview (perspective,
+ *                ambient occlusion, soft shadows, real depth)
+ *     - stl()    extracts an isosurface for printing
+ *   Both see exactly the same geometry, so the picture cannot promise a shape
+ *   the printer will not produce. The old painter's-algorithm renderer could:
+ *   it had no depth buffer, and a part drawn "behind" a wall was decided by a
+ *   sort key, not by geometry.
  *
  * Public API:
- *   Enclosure.build(enc, dia)   -> model { shells, parts, problems, warns, stats }
- *   Enclosure.check(enc, dia)   -> { problems, warns, stats }
- *   Enclosure.render(enc, dia, opts) -> { svg, stats, problems }
- *   Enclosure.stl(model)        -> Uint8Array (binary STL, millimetres)
- *   Enclosure.init(dia)         -> a draft enclosure.json for that circuit
+ *   Enclosure.init(dia)                     -> a draft enclosure.json
+ *   Enclosure.model(enc, dia)               -> { sdf, parts, holes, problems, warns, stats }
+ *   Enclosure.check(enc, dia)               -> { problems, warns, stats }
+ *   Enclosure.paint(canvas, enc, dia, opts) -> draws pixels into a <canvas>
+ *   Enclosure.render(enc, dia, opts)        -> { svg }  wireframe fallback
+ *   Enclosure.stl(enc, dia, opts)           -> { data, stats }  binary STL
  *
- * Coordinates: millimetres, x right, y back, z up. The base sits on z = 0 so
- * the model drops straight onto a print bed.
+ * Coordinates: millimetres, x right, y back, z up. z = 0 is the bed, so the
+ * model drops straight onto it; -y is the face of the device.
  */
 var Enclosure = (function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '2.0.0';
 
   /* ------------------------------------------------------------------ *
    * 1. Real dimensions
    *
-   * These are measured part sizes, not Wokwi's drawing sizes. They are the
-   * one place in this repo where a number can be wrong in a way that wastes
-   * filament, so:
-   *   - each entry is the part's bounding box [width, depth, height] in mm,
-   *     including the tallest thing that sticks out (servo horn excluded,
-   *     because the horn is what pokes through the lid);
-   *   - a port is a hole that must exist in the shell, given as a rectangle
-   *     on one face in local coordinates with the box origin at its min
-   *     corner: face '-y' / '+y' -> (x, z), '-x' / '+x' -> (y, z),
-   *     '+z' -> (x, y);
-   *   - "round" ports are circles inscribed in that rectangle.
+   * Measured part sizes, not Wokwi's drawing sizes. Each entry is the part's
+   * bounding box [width, depth, height] in mm, plus the ports that must see
+   * daylight. `rect` is [a0,b0,a1,b1] on that face, with a along the face's
+   * horizontal axis and b along its vertical one.
    *
-   * If a caliper disagrees with a number here, the caliper wins: edit this
-   * table. check_enclosure prints every assumed size for exactly that reason.
+   * `round: true` means the opening is circular - a transducer, a lens, a
+   * button cap. A square hole in front of a round emitter wastes nothing but
+   * looks wrong, and "looks wrong" is the only signal a preview can give.
    * ------------------------------------------------------------------ */
   var DIM = {
     'board-esp32-devkit-c-v4': {
@@ -111,699 +118,117 @@ var Enclosure = (function () {
     }
   };
 
-  /* Anything not in the table still has to fit somewhere, so it gets a box
-   * and a loud warning rather than a silent 0x0. */
+  // A part we have no measurement for is a box this size plus a warning. A
+  // silent 0x0x0 would put two parts in the same place and call it a fit.
   var UNKNOWN_SIZE = [12, 12, 12];
 
   /* ------------------------------------------------------------------ *
-   * 2. Small vector / 2D helpers
+   * 2. Small vector / SDF kit
+   *
+   * Math.hypot is an order of magnitude slower than sqrt in V8 and this file
+   * calls it millions of times per render, so everything goes through hyp().
    * ------------------------------------------------------------------ */
   function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
-  function cross(a, b) {
-    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-  }
   function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
   function vlen(a) { return Math.sqrt(dot(a, a)); }
   function vnorm(a) { var l = vlen(a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function mix(a, b, t) { return a + (b - a) * t; }
+  function hyp(a, b) { return Math.sqrt(a * a + b * b); }
+  function hypot3(a, b, c) { return Math.sqrt(a * a + b * b + c * c); }
 
-  function area2(a, b, c) { return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); }
-
-  function polyArea(p) {
-    var s = 0;
-    for (var i = 0; i < p.length; i++) {
-      var j = (i + 1) % p.length;
-      s += p[i][0] * p[j][1] - p[j][0] * p[i][1];
-    }
-    return s / 2;
+  /* Polynomial smooth min/max. k is the blend width in mm: 0 is a hard union,
+   * 3-8 reads as a moulded fillet, 12+ melts two forms into one. This is the
+   * entire reason a shell can have a soft shoulder without a CAD kernel. */
+  function smin(a, b, k) {
+    if (!k) return a < b ? a : b;
+    var h = Math.max(k - Math.abs(a - b), 0) / k;
+    return (a < b ? a : b) - h * h * k * 0.25;
+  }
+  function smax(a, b, k) {
+    if (!k) return a > b ? a : b;
+    var h = Math.max(k - Math.abs(a - b), 0) / k;
+    return (a > b ? a : b) + h * h * k * 0.25;
   }
 
-  function pointInTri(p, a, b, c) {
-    var d1 = area2(a, b, p), d2 = area2(b, c, p), d3 = area2(c, a, p);
-    var neg = d1 < -1e-9 || d2 < -1e-9 || d3 < -1e-9;
-    var pos = d1 > 1e-9 || d2 > 1e-9 || d3 > 1e-9;
-    return !(neg && pos);
+  /* Rounded box extruded along z: R is the corner radius in plan, rzT/rzB the
+   * fillet at the top and bottom edge. Keeping them separate is what lets a
+   * shell sit flat on the bed (rzB small) while still having soft shoulders
+   * (rzT large) - 96x80x26 with one radius looks like a soap bar either way.
+   *
+   * The `At` form takes plain numbers. It exists for one reason: the outer
+   * surface is evaluated for every ray step of every pixel, and building
+   * three throw-away arrays per call was a fifth of the render time. */
+  function sdRBoxAt(px, py, pz, cx, cy, cz, bx, by, bz, R, rzT, rzB) {
+    var qx = Math.abs(px - cx) - bx + R;
+    var qy = Math.abs(py - cy) - by + R;
+    var d2 = Math.min(Math.max(qx, qy), 0) + hyp(Math.max(qx, 0), Math.max(qy, 0)) - R;
+    var rz = pz - cz > 0 ? (rzT == null ? R : rzT) : (rzB == null ? (rzT == null ? R : rzT) : rzB);
+    var qz = Math.abs(pz - cz) - bz + rz;
+    var d2i = d2 + rz;
+    return Math.min(Math.max(d2i, qz), 0) + hyp(Math.max(d2i, 0), Math.max(qz, 0)) - rz;
+  }
+  function sdRBox(p, b, R, rzT, rzB) {
+    return sdRBoxAt(p[0], p[1], p[2], 0, 0, 0, b[0], b[1], b[2], R, rzT, rzB);
   }
 
-  function pointInPoly(p, poly) {
-    var inside = false;
-    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      var a = poly[i], b = poly[j];
-      if ((a[1] > p[1]) !== (b[1] > p[1]) &&
-          p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0]) inside = !inside;
-    }
-    return inside;
+  function sdBox(p, b, r) {
+    r = r || 0;
+    var qx = Math.abs(p[0]) - b[0] + r, qy = Math.abs(p[1]) - b[1] + r, qz = Math.abs(p[2]) - b[2] + r;
+    return hypot3(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qy, qz), 0) - r;
   }
 
-  function samePt(a, b) {
-    return Math.abs(a[0] - b[0]) < 1e-7 && Math.abs(a[1] - b[1]) < 1e-7;
+  function sdEllipsoid(p, c, r) {
+    var x = (p[0] - c[0]) / r[0], y = (p[1] - c[1]) / r[1], z = (p[2] - c[2]) / r[2];
+    var k0 = Math.sqrt(x * x + y * y + z * z);
+    if (k0 < 1e-9) return -Math.min(r[0], r[1], r[2]);
+    var x1 = x / r[0], y1 = y / r[1], z1 = z / r[2];
+    return k0 * (k0 - 1) / Math.sqrt(x1 * x1 + y1 * y1 + z1 * z1);
   }
 
-  /* Proper crossing only: segments that merely share an endpoint are a
-   * junction, not a block, and treating them as one makes every candidate
-   * bridge look invisible. */
-  function segCross(a, b, c, d) {
-    if (samePt(a, c) || samePt(a, d) || samePt(b, c) || samePt(b, d)) return false;
-    var d1 = area2(c, d, a), d2 = area2(c, d, b), d3 = area2(a, b, c), d4 = area2(a, b, d);
-    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+  function sdCylZ(p, c, r, h) {
+    var d = hyp(p[0] - c[0], p[1] - c[1]) - r;
+    var w = Math.abs(p[2] - c[2]) - h;
+    return Math.min(Math.max(d, w), 0) + hyp(Math.max(d, 0), Math.max(w, 0));
+  }
+
+  /* A capped cone, as the intersection of three half-spaces: the side, and
+   * the two end caps. Writing it as max() of half-space distances is both
+   * shorter than the "rounded cone" formula and, crucially, *conservative* -
+   * the intersection is a subset of every one of its half-spaces, so
+   * max() can never over-estimate the distance and the raymarcher cannot
+   * step through the surface. The blended callers (smin) round off the
+   * seam anyway.
+   *
+   * The naive version - "clamp the radius to the height, then take the
+   * usual max/sqrt" - reports 0 everywhere on the plane z = c +/- h,
+   * whatever the radius. A cone used as a shape then quietly fills the
+   * entire build plate with a zero-thickness sheet, and every part standing
+   * on the floor measures 0.5 mm inside it. */
+  function sdConeZ(p, c, r1, r2, h) {
+    var rad = hyp(p[0] - c[0], p[1] - c[1]);
+    var z = p[2] - c[2];
+    var dr = r2 - r1, len = hyp(2 * h, dr);
+    // signed distance to the slanted side, measured from the rim at z = -h
+    var side = (2 * h * (rad - r1) - dr * (z + h)) / len;
+    return Math.max(side, Math.abs(z) - h);
   }
 
   /* ------------------------------------------------------------------ *
-   * 2b. Strips: the actual triangulator
-   *
-   * Every face this module builds is "axis-aligned rectangle minus convex
-   * holes", and that shape has a decomposition with no bridge, no slit and no
-   * ear to miss:
-   *
-   *   cut the rectangle into horizontal bands at every hole vertex y.
-   *   Inside one band a convex hole crosses as a straight segment, so the
-   *   material is a set of trapezoids and each one is two triangles.
-   *
-   * The bridge-and-earclip path below still exists for faces whose outline is
-   * not a rectangle (the circular ring on top of a screw post), but it is the
-   * fallback, not the workhorse: weaving four round holes into one outline
-   * with slits produced a face that closed edge to edge while covering 1192
-   * of its 7680 mm2 twice. Closure alone cannot see that; the area audit in
-   * cap() can.
-   * ------------------------------------------------------------------ */
-  function rectOf(loop) {
-    if (loop.length !== 4) return null;
-    var x0 = Math.min(loop[0][0], loop[1][0], loop[2][0], loop[3][0]);
-    var x1 = Math.max(loop[0][0], loop[1][0], loop[2][0], loop[3][0]);
-    var y0 = Math.min(loop[0][1], loop[1][1], loop[2][1], loop[3][1]);
-    var y1 = Math.max(loop[0][1], loop[1][1], loop[2][1], loop[3][1]);
-    for (var i = 0; i < 4; i++) {
-      var onX = Math.abs(loop[i][0] - x0) < 1e-9 || Math.abs(loop[i][0] - x1) < 1e-9;
-      var onY = Math.abs(loop[i][1] - y0) < 1e-9 || Math.abs(loop[i][1] - y1) < 1e-9;
-      if (!onX || !onY) return null;
-    }
-    return [x0, y0, x1, y1];
-  }
-
-  /* Vertical tolerance for "this vertex sits on the band boundary".
-   *
-   * Round loops come out of cos/sin, so two congruent holes 57 mm apart can
-   * land their topmost vertex 7e-15 mm apart. The band list keeps one of the
-   * two values; the other hole is then a hair ABOVE its own band boundary, no
-   * edge crosses that line, and the band reports "no hole here" and fills
-   * straight across the top of the hole. The result is a 0.3 mm2 sliver of
-   * plastic over the opening - and, because the caps on both faces do it
-   * identically while the tube still follows the true vertices, a seam that
-   * never closes. Snapping the vertex onto the boundary is what makes the
-   * strip decomposition stable for round holes. */
-  var Y_EPS = 1e-7;
-
-  /* Where a convex loop crosses the horizontal line y: [left, right]. */
-  function spanAt(loop, y) {
-    var lo = Infinity, hi = -Infinity;
-    for (var i = 0; i < loop.length; i++) {
-      var a = loop[i], b = loop[(i + 1) % loop.length];
-      var ay = Math.abs(a[1] - y) <= Y_EPS ? y : a[1];
-      var by = Math.abs(b[1] - y) <= Y_EPS ? y : b[1];
-      if ((ay - y) * (by - y) > 0) continue;
-      if (ay === by) {                       /* horizontal edge, level with y */
-        lo = Math.min(lo, a[0], b[0]);
-        hi = Math.max(hi, a[0], b[0]);
-        continue;
-      }
-      var t = (y - ay) / (by - ay);
-      if (t < -1e-9 || t > 1 + 1e-9) continue;
-      var x = a[0] + (b[0] - a[0]) * t;
-      if (x < lo) lo = x;
-      if (x > hi) hi = x;
-    }
-    return lo === Infinity ? null : [lo, hi];
-  }
-
-  function stripTri(outer, holes) {
-    var r = rectOf(outer);
-    if (!r) return null;
-    var x0 = r[0], y0 = r[1], x1 = r[2], y1 = r[3];
-    var ys = [y0, y1], i, j;
-    for (i = 0; i < holes.length; i++) {
-      for (j = 0; j < holes[i].length; j++) {
-        var v = holes[i][j][1];
-        if (v > y0 + 1e-9 && v < y1 - 1e-9) ys.push(v);
-      }
-    }
-    ys.sort(function (a, b) { return a - b; });
-    var uniq = [];
-    for (i = 0; i < ys.length; i++) {
-      if (!uniq.length || ys[i] - uniq[uniq.length - 1] > 1e-9) uniq.push(ys[i]);
-    }
-
-    var tris = [];
-    function tri2(pa, pb, pc) {
-      var a = area2(pa, pb, pc);
-      if (Math.abs(a) < 1e-9) return;
-      if (a < 0) tris.push([pa, pc, pb]);
-      else tris.push([pa, pb, pc]);
-    }
-    function quad(pa, pb, pc, pd) {
-      tri2(pa, pb, pc);
-      tri2(pa, pc, pd);
-    }
-
-    for (var b = 0; b + 1 < uniq.length; b++) {
-      var ya = uniq[b], yb = uniq[b + 1];
-      if (yb - ya < 1e-9) continue;
-      var ym = (ya + yb) / 2;
-      var live = [];
-      for (i = 0; i < holes.length; i++) {
-        var mid = spanAt(holes[i], ym);
-        if (!mid) continue;
-        var sa = spanAt(holes[i], ya), sb = spanAt(holes[i], yb);
-        if (!sa || !sb) continue;
-        live.push({ a: sa, b: sb, m: mid });
-      }
-      live.sort(function (p, q) { return p.m[0] - q.m[0]; });
-      var curA = x0, curB = x0;
-      for (i = 0; i < live.length; i++) {
-        var la = Math.max(x0, Math.min(x1, live[i].a[0]));
-        var lb = Math.max(x0, Math.min(x1, live[i].b[0]));
-        if (la > curA + 1e-9 || lb > curB + 1e-9) quad([curA, ya], [la, ya], [lb, yb], [curB, yb]);
-        curA = Math.max(curA, Math.min(x1, live[i].a[1]));
-        curB = Math.max(curB, Math.min(x1, live[i].b[1]));
-      }
-      if (x1 > curA + 1e-9 || x1 > curB + 1e-9) quad([curA, ya], [x1, ya], [x1, yb], [curB, yb]);
-    }
-    return tris;
-  }
-
-  /* ------------------------------------------------------------------ *
-   * 3. Triangulating a face with holes
-   *
-   * Every cap in this model is "rectangle minus zero or more cutouts".
-   * Ear clipping alone only eats simple polygons, so each hole is first
-   * stitched into the outline with a bridge - a zero-area slit from a hole
-   * vertex to a visible outer vertex. The result is one simple polygon, and
-   * the bridge's two coincident edges are internal, so the cap stays closed.
-   *
-   * If the stitching or the clipping ever drops a region, the shell will
-   * have an unmatched edge and the closure check fails loudly - which is
-   * why this is safe to keep simple instead of clever.
-   * ------------------------------------------------------------------ */
-  /* A bridge is usable when it stays in the material the whole way: it must
-   * cross no edge, and it must not cut through any hole. The second half is
-   * not a nicety - a hole sitting on the diagonal to the chosen corner makes
-   * the bridge run along its own boundary, which produces a zero-width slit
-   * that ear clipping emits as a degenerate triangle. That failed on a grid
-   * of vent slots before this check existed. */
-  function visibleFrom(poly, holes, p, q) {
-    var s, t, mid, h, loop, j;
-    for (s = 1; s <= 8; s++) {
-      t = s / 9;
-      mid = [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
-      if (!pointInPoly(mid, poly)) return false;
-      for (h = 0; h < holes.length; h++) {
-        if (pointInPoly(mid, holes[h])) return false;
-      }
-    }
-    for (var i = 0; i < poly.length; i++) {
-      if (segCross(p, q, poly[i], poly[(i + 1) % poly.length])) return false;
-    }
-    for (h = 0; h < holes.length; h++) {
-      loop = holes[h];
-      for (j = 0; j < loop.length; j++) {
-        if (segCross(p, q, loop[j], loop[(j + 1) % loop.length])) return false;
-      }
-    }
-    return true;
-  }
-
-  var stitchFail = 0;
-  var capFail = 0;
-  var failNote = [];
-
-  /* A hole loop is not always a rectangle - a round port is a 24-gon, and
-   * reading its bounding x off vertices 0 and 2 puts it in the wrong place in
-   * the right-to-left order. That is not cosmetic: weaving two holes in the
-   * wrong order makes the outline cross itself, and the face then double
-   * covers a patch while still closing edge to edge. */
-  function maxX(loop) {
-    var m = -Infinity;
-    for (var i = 0; i < loop.length; i++) if (loop[i][0] > m) m = loop[i][0];
-    return m;
-  }
-
-  function stitch(outer, holes) {
-    var poly = outer.slice();
-    /* Bridges always land on the OUTER outline, never on another hole's
-     * vertex. Two holes joined by a bridge look fine on paper and produce a
-     * polygon whose slit is traversed twice through a third hole's corner;
-     * ear clipping then drops a sliver, and the shell quietly stops being
-     * closed. A face with nine openings (the duck's front wall) is exactly
-     * where that showed up. */
-    var onOuter = [];
-    for (var oi = 0; oi < outer.length; oi++) onOuter.push(outer[oi]);
-
-    /* Right to left, because a bridge always runs toward +x: handling the
-     * rightmost hole first means later bridges travel over ground that is
-     * already stitched, which is the ordering the classic algorithm assumes. */
-    var order = holes.slice().sort(function (a, b) { return maxX(b) - maxX(a); });
-
-    for (var h = 0; h < order.length; h++) {
-      var hole = order[h].slice();
-      if (polyArea(hole) > 0) hole.reverse();          // holes run clockwise
-      var hi = 0;
-      for (var i = 1; i < hole.length; i++) if (hole[i][0] > hole[hi][0] + 1e-9) hi = i;
-      var p = hole[hi];
-      var best = -1, bestD = Infinity;
-      /* Prefer a vertex of the outer outline, fall back to any vertex of the
-       * welded polygon. The fallback is what makes a face with a dozen
-       * openings work at all; past roughly a dozen the outline turns into a
-       * maze and no bridge stays in the material - that is reported, not
-       * guessed at. */
-      for (var pass = 0; pass < 2 && best < 0; pass++) {
-        for (var k = 0; k < poly.length; k++) {
-          var q = poly[k];
-          if (pass === 0 && onOuter.indexOf(q) < 0) continue;
-          var d = (q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1]);
-          if (d < bestD && visibleFrom(poly, holes, p, q)) { best = k; bestD = d; }
-        }
-      }
-      if (best < 0) { stitchFail++; continue; }        // closure check will catch the fallout too
-      var rot = hole.slice(hi).concat(hole.slice(0, hi));
-      /* Walk: ... q -> p, around the hole, p -> q, then carry on after q.
-       * Writing q twice, or dropping the return edge, leaves a zero-length
-       * edge and a degenerate triangle - which ear clipping happily emits and
-       * the closure check then reports as three orphans. */
-      var out = [];
-      for (var a1 = 0; a1 <= best; a1++) out.push(poly[a1]);
-      for (var a2 = 0; a2 < rot.length; a2++) out.push(rot[a2]);
-      out.push(rot[0]);
-      out.push(poly[best]);
-      for (var a3 = best + 1; a3 < poly.length; a3++) out.push(poly[a3]);
-      poly = out;
-    }
-    return poly;
-  }
-
-  var earFail = 0;
-
-  function earclip(poly) {
-    var pts = poly.slice();
-    if (polyArea(pts) < 0) pts.reverse();
-    var tris = [], guard = 0;
-    while (pts.length > 3 && guard++ < 40000) {
-      var n = pts.length, done = false;
-      for (var k = 0; k < n; k++) {
-        var a = pts[(k + n - 1) % n], b = pts[k], c = pts[(k + 1) % n];
-        if (area2(a, b, c) <= 1e-9) continue;
-        var clean = true;
-        for (var m = 0; m < n; m++) {
-          var p = pts[m];
-          /* Compare by POSITION, not by identity: a bridge re-pushes two
-           * vertices, so the same corner appears twice in the list. An ear
-           * next to the slit then looks blocked by its own twin, no ear is
-           * ever found, and the fallback below starts emitting triangles that
-           * cover ground already covered - a face that closes edge to edge
-           * while claiming 30% more area than it has. */
-          if (p === a || p === b || p === c) continue;
-          if (samePt(p, a) || samePt(p, b) || samePt(p, c)) continue;
-          if (pointInTri(p, a, b, c)) { clean = false; break; }
-        }
-        if (!clean) continue;
-        tris.push([a, b, c]);
-        pts.splice(k, 1);
-        done = true;
-        break;
-      }
-      if (done) continue;
-      /* No ear found: numerical trouble. Clip the most convex corner rather
-       * than spin forever; a slightly thin triangle beats an infinite loop.
-       * It is counted, because it is the one path that can produce a
-       * self-overlapping face. */
-      earFail++;
-      var bi = 0, bv = -Infinity;
-      for (var j = 0; j < n; j++) {
-        var v = area2(pts[(j + n - 1) % n], pts[j], pts[(j + 1) % n]);
-        if (v > bv) { bv = v; bi = j; }
-      }
-      tris.push([pts[(bi + n - 1) % n], pts[bi], pts[(bi + 1) % n]]);
-      pts.splice(bi, 1);
-    }
-    if (pts.length === 3) tris.push(pts.slice());
-    return tris;
-  }
-
-  /* ------------------------------------------------------------------ *
-   * 4. Shells
-   *
-   * A shell is one closed manifold: a triangle soup whose every directed
-   * edge is matched by exactly one opposite edge. Two shells may overlap by
-   * a fraction of a millimetre where they must join (a boss into the floor);
-   * they are never merged, because merging needs a CSG kernel and this ships
-   * as a single file with no dependencies. Slicers union overlapping volumes.
-   * ------------------------------------------------------------------ */
-  function shell(name, color, kind) {
-    return { name: name, color: color, kind: kind || 'solid', tris: [] };
-  }
-
-  function tri(sh, a, b, c) {
-    var n = cross(sub(b, a), sub(c, a));
-    if (vlen(n) < 1e-7) return;                        // degenerate
-    sh.tris.push([a, b, c]);
-  }
-
-  /* cap(): fill a planar face described in its own 2D coordinates.
-   * map([u,v]) -> [x,y,z] puts the face in the world; `flip` reverses the
-   * winding when the face points the other way. */
-  function cap(sh, map, outer, holes, flip) {
-    var tris = holes && holes.length ? stripTri(outer, holes) : earclip(outer);
-    if (!tris) tris = earclip(stitch(outer, holes));
-
-    /* Area audit. A face whose triangles cover less - or twice - the area it
-     * should is a face that will not print, and the picture cannot show it:
-     * the extra triangles are coplanar, so they shade identically. Every
-     * triangle here is planar, so the comparison is exact up to rounding. */
-    var want = Math.abs(polyArea(outer));
-    if (holes) for (var h = 0; h < holes.length; h++) want -= Math.abs(polyArea(holes[h]));
-    var got = 0;
-    for (var g = 0; g < tris.length; g++) got += Math.abs(area2(tris[g][0], tris[g][1], tris[g][2])) / 2;
-    if (want > 1e-6 && Math.abs(got - want) > Math.max(0.5, want * 0.002)) {
-      capFail++;
-      failNote.push(sh.name + ': 面积 ' + got.toFixed(1) + ' ≠ ' + want.toFixed(1) + ' mm²');
-    }
-
-    for (var i = 0; i < tris.length; i++) {
-      var t = tris[i];
-      var p0 = map(t[0]), p1 = map(t[1]), p2 = map(t[2]);
-      if (flip) tri(sh, p0, p2, p1); else tri(sh, p0, p1, p2);
-    }
-  }
-
-  /* A through-hole is a tube: same loop on two parallel planes. */
-  function tube(sh, mapA, mapB, loop, flip) {
-    for (var i = 0; i < loop.length; i++) {
-      var j = (i + 1) % loop.length;
-      var a0 = mapA(loop[i]), a1 = mapA(loop[j]);
-      var b0 = mapB(loop[i]), b1 = mapB(loop[j]);
-      if (flip) { tri(sh, a0, b1, a1); tri(sh, a0, b0, b1); }
-      else { tri(sh, a0, a1, b1); tri(sh, a0, b1, b0); }
-    }
-  }
-
-  function mkRect(a0, b0, a1, b1) {
-    return [[a0, b0], [a1, b0], [a1, b1], [a0, b1]];
-  }
-
-  function mkCircle(a0, b0, a1, b1, seg) {
-    var cu = (a0 + a1) / 2, cv = (b0 + b1) / 2;
-    var r = Math.min(Math.abs(a1 - a0), Math.abs(b1 - b0)) / 2;
-    var n = seg || 20, out = [];
-    for (var i = 0; i < n; i++) {
-      var th = (i / n) * Math.PI * 2;
-      out.push([cu + Math.cos(th) * r, cv + Math.sin(th) * r]);
-    }
-    return out;
-  }
-
-  /* hole = { loop, aabb:[a0,b0,a1,b1], face } in wall-local 2D */
-  function holeFrom(spec, margin) {
-    var m = margin == null ? 0.4 : margin;
-    var a0 = Math.min(spec[0], spec[2]) - m, a1 = Math.max(spec[0], spec[2]) + m;
-    var b0 = Math.min(spec[1], spec[3]) - m, b1 = Math.max(spec[1], spec[3]) + m;
-    var loop = spec.round ? mkCircle(a0, b0, a1, b1) : mkRect(a0, b0, a1, b1);
-    return { loop: loop, aabb: [a0, b0, a1, b1] };
-  }
-
-  function holesOf(list) {
-    return (list || []).map(function (h) { return h.loop; });
-  }
-
-  /* ------------------------------------------------------------------ *
-   * 5. The cup: one function builds the base and the lid
-   *
-   * Both are the same solid with the opening on opposite ends, so they share
-   * one builder. That matters: a lid whose lip did not match the base's
-   * cavity, because the two were written by hand, is the most common way a
-   * printed enclosure fails to close.
-   * ------------------------------------------------------------------ */
-  function cup(o) {
-    var W = o.W, D = o.D, H = o.H, t = o.t, f = o.f;
-    var openUp = o.open === '+z';
-    var sh = shell(o.name, o.color, o.kind);
-
-    var cav0 = openUp ? f : 0;
-    var cav1 = openUp ? H : H - f;
-    var rectOuter = mkRect(0, 0, W, D);
-    var rectCav = mkRect(t, t, W - t, D - t);
-
-    /* the closed end */
-    var bottomHoles = holesOf(cav0 === f ? o.holes.bottom : null);
-    if (openUp) {
-      cap(sh, function (p) { return [p[0], p[1], 0]; }, rectOuter, holesOf(o.holes.bottom), true);
-    } else {
-      cap(sh, function (p) { return [p[0], p[1], H]; }, rectOuter, holesOf(o.holes.top), false);
-    }
-
-    /* the open end: a frame, outer rect minus cavity */
-    var rimZ = openUp ? H : 0;
-    cap(sh, function (p) { return [p[0], p[1], rimZ]; }, rectOuter, [rectCav], !openUp);
-
-    /* four side walls: outer face, inner face, tubes through the holes */
-    var walls = [
-      { key: 'front', outer: function (p) { return [p[0], 0, p[1]]; },
-        inner: function (p) { return [p[0], t, p[1]]; }, span: [W, H], oflip: false },
-      { key: 'back', outer: function (p) { return [p[0], D, p[1]]; },
-        inner: function (p) { return [p[0], D - t, p[1]]; }, span: [W, H], oflip: true },
-      { key: 'left', outer: function (p) { return [0, p[0], p[1]]; },
-        inner: function (p) { return [t, p[0], p[1]]; }, span: [D, H], oflip: true },
-      { key: 'right', outer: function (p) { return [W, p[0], p[1]]; },
-        inner: function (p) { return [W - t, p[0], p[1]]; }, span: [D, H], oflip: false }
-    ];
-
-    for (var wi = 0; wi < walls.length; wi++) {
-      var w = walls[wi];
-      var rect = mkRect(0, 0, w.span[0], w.span[1]);
-      var holes = o.holes[w.key] || [];
-      cap(sh, w.outer, rect, holesOf(holes), w.oflip);
-      /* The inner face is the cavity wall, so it spans the cavity - not the
-         full outer width. Spanning the full width would leave a surface
-         buried inside the corner material, and its edges would match nothing
-         (which is exactly how the closure check found this). */
-      cap(sh, w.inner, mkRect(t, cav0, w.span[0] - t, cav1), holesOf(holes), !w.oflip);
-      for (var hi = 0; hi < holes.length; hi++) {
-        tube(sh, w.outer, w.inner, holes[hi].loop, w.oflip);
-      }
-    }
-
-    /* the inner floor / ceiling */
-    if (openUp) {
-      cap(sh, function (p) { return [p[0], p[1], f]; }, rectCav, holesOf(o.holes.bottom), false);
-      for (var bi = 0; bi < (o.holes.bottom || []).length; bi++) {
-        tube(sh, function (p) { return [p[0], p[1], 0]; },
-             function (p) { return [p[0], p[1], f]; }, o.holes.bottom[bi].loop, true);
-      }
-    } else {
-      cap(sh, function (p) { return [p[0], p[1], H - f]; }, rectCav, holesOf(o.holes.top), true);
-      for (var ti = 0; ti < (o.holes.top || []).length; ti++) {
-        tube(sh, function (p) { return [p[0], p[1], H]; },
-             function (p) { return [p[0], p[1], H - f]; }, o.holes.top[ti].loop, false);
-      }
-    }
-    return sh;
-  }
-
-  /* A screw post: a closed tube standing on the floor. Overlaps the floor by
-   * 0.3 mm on purpose - two coplanar faces are worse for a slicer than a
-   * deliberate overlap.
-   *
-   * The overlap has to go INTO the floor, not below it. Starting at z = -0.3
-   * put a 0.3 mm foot under every post, so the whole part rested on four small
-   * discs with the real floor hanging in the air - a print that comes off the
-   * bed or warps, and the sort of thing that only shows up on the printer. */
-  function boss(b, floor) {
-    var sh = shell('boss', b.color || '#94a3b8', 'boss');
-    var z0 = (floor == null ? 0 : floor) - 0.3, z1 = b.h;
-    var outer = mkCircle(b.at[0] - b.d / 2, b.at[1] - b.d / 2, b.at[0] + b.d / 2, b.at[1] + b.d / 2, 24);
-    var inner = mkCircle(b.at[0] - b.hole / 2, b.at[1] - b.hole / 2,
-                         b.at[0] + b.hole / 2, b.at[1] + b.hole / 2, 24);
-    var at0 = function (p) { return [p[0], p[1], z0]; };
-    var at1 = function (p) { return [p[0], p[1], z1]; };
-    cap(sh, at1, outer, [inner], false);
-    cap(sh, at0, outer, [inner], true);
-    tube(sh, at1, at0, outer, true);
-    tube(sh, at1, at0, inner, false);
-    return sh;
-  }
-
-  /* A shelf: a plate growing out of one wall, for a part that has to look
-   * out of that wall but cannot stand on the floor.
-   *
-   * The sonar is the case that forces this. A HC-SR04 sees sideways, so it
-   * must sit against the front wall - but its beam has to clear the floor and
-   * the board, which puts it 28 mm up in the air. Without a shelf the only
-   * way to draw it there is to let it float, and a model that floats is a
-   * model that cannot be assembled. The shelf is four numbers (where it
-   * starts, how big, what height) and it turns "drawn in the right place" into
-   * "held in the right place".
-   *
-   * Like a boss it is its own closed box, sunk 0.3 mm into the wall it grows
-   * from, so no two faces are coplanar. */
-  function shelfShell(s, enc) {
-    var t = enc.base.wall, W = enc.base.w, D = enc.base.d, H = enc.base.h;
-    var thick = s.thick == null ? 2.4 : s.thick;
-    var x0 = s.at[0], y0 = s.at[1], x1 = x0 + s.size[0], y1 = y0 + s.size[1];
-    var z1 = s.z, z0 = z1 - thick;
-    var bites = [];
-    if (x0 <= t + 1) { x0 = t - 0.3; bites.push('left'); }
-    if (x1 >= W - t - 1) { x1 = W - t + 0.3; bites.push('right'); }
-    if (y0 <= t + 1) { y0 = t - 0.3; bites.push('front'); }
-    if (y1 >= D - t - 1) { y1 = D - t + 0.3; bites.push('back'); }
-    var sh = shell(s.id || 'shelf', s.color || enc.style.accent || enc.style.color, 'shelf');
-    var tris = boxTris({ x0: x0, y0: y0, z0: z0, x1: x1, y1: y1, z1: z1 });
-    for (var i = 0; i < tris.length; i++) tri(sh, tris[i][0], tris[i][1], tris[i][2]);
-    sh.meta = { z1: z1, z0: z0, x0: x0, x1: x1, y0: y0, y1: y1, bites: bites };
-    return sh;
-  }
-
-  /* ------------------------------------------------------------------ *
-   * 6. Layout: diagram.json + enclosure.json -> world-space parts
-   * ------------------------------------------------------------------ */
-  /* A rotation is either a number (degrees about z) or "x90" / "y-90" /
-   * "z180". Only multiples of 90 are allowed: anything else turns a box into
-   * an oriented box, and every check in this file is an AABB test. Keeping
-   * the rotation axis-aligned is what lets a 5 mm LED point at the front of
-   * the duck without the fit maths falling apart. */
-  function rotAxis(rot) {
-    if (typeof rot === 'number') return ['z', ((rot % 360) + 360) % 360];
-    var m = /^([xyz])\s*(-?\d+)$/.exec(String(rot == null ? '0' : rot).trim());
-    if (!m) return ['z', 0];
-    return [m[1], ((parseInt(m[2], 10) % 360) + 360) % 360];
-  }
-
-  function rotMat(rot) {
-    var ax = rotAxis(rot), a = ax[1] * Math.PI / 180;
-    var c = Math.round(Math.cos(a)), s = Math.round(Math.sin(a));
-    if (ax[0] === 'x') return [[1, 0, 0], [0, c, -s], [0, s, c]];
-    if (ax[0] === 'y') return [[c, 0, s], [0, 1, 0], [-s, 0, c]];
-    return [[c, -s, 0], [s, c, 0], [0, 0, 1]];
-  }
-
-  function applyM(m, p) {
-    return [m[0][0] * p[0] + m[0][1] * p[1] + m[0][2] * p[2],
-            m[1][0] * p[0] + m[1][1] * p[1] + m[1][2] * p[2],
-            m[2][0] * p[0] + m[2][1] * p[1] + m[2][2] * p[2]];
-  }
-
-  /* extent of the rotated box: exact, because cos/sin are rounded to 0/±1 */
-  function rotSize(size, m) {
-    var c = [size[0] / 2, size[1] / 2, size[2] / 2], out = [0, 0, 0];
-    for (var sx = -1; sx <= 1; sx += 2) {
-      for (var sy = -1; sy <= 1; sy += 2) {
-        for (var sz = -1; sz <= 1; sz += 2) {
-          var q = applyM(m, [sx * c[0], sy * c[1], sz * c[2]]);
-          for (var i = 0; i < 3; i++) out[i] = Math.max(out[i], Math.abs(q[i]));
-        }
-      }
-    }
-    return [out[0] * 2, out[1] * 2, out[2] * 2];
-  }
-
-  /* rotate about the box centre, then re-anchor so the min corner is (0,0,0) */
-  function placeLocal(p, size, m) {
-    var c = [size[0] / 2, size[1] / 2, size[2] / 2];
-    var ext = rotSize(size, m);
-    var q = applyM(m, [p[0] - c[0], p[1] - c[1], p[2] - c[2]]);
-    return [q[0] + ext[0] / 2, q[1] + ext[1] / 2, q[2] + ext[2] / 2];
-  }
-
-  function resolveParts(enc, dia) {
-    var byId = {};
-    (dia.parts || []).forEach(function (p) { byId[p.id] = p; });
-
-    var out = [];
-    (enc.parts || []).forEach(function (place) {
-      var src = byId[place.id];
-      var dim = src ? DIM[src.type] : null;
-      var size = dim ? dim.size.slice() : UNKNOWN_SIZE.slice();
-      if (place.size) size = place.size.slice();          // a caliper override
-      var m = rotMat(place.rot);
-      var ext = rotSize(size, m);
-      var at = place.at || [0, 0, 0];
-      var box = {
-        x0: at[0], y0: at[1], z0: at[2],
-        x1: at[0] + ext[0], y1: at[1] + ext[1], z1: at[2] + ext[2]
-      };
-      var part = {
-        id: place.id, type: src ? src.type : '(not in diagram.json)',
-        known: !!dim, color: (dim && dim.color) || '#94a3b8',
-        box: box, at: at, size: ext, rot: place.rot || 0, ports: []
-      };
-      if (dim) {
-        (dim.ports || []).forEach(function (port) {
-          part.ports.push(resolvePort(port, box, size, m, place));
-        });
-      }
-      out.push(part);
-    });
-    return out;
-  }
-
-  /* Reduce a port to "which wall, and where on it":
-   *   a/b   the two in-plane axes, in that wall's own 2D frame
-   *   plane the coordinate of the face it sits on
-   * so the cutout step never has to think in 3D again. */
-  function resolvePort(port, box, size, m, place) {
-    var corners = faceCorners(port.face, port.rect, size).map(function (p) {
-      var q = placeLocal(p, size, m);
-      return [q[0] + box.x0, q[1] + box.y0, q[2] + box.z0];
-    });
-    var n = rotNormal(port.face, m);
-    var xs = corners.map(function (p) { return p[0]; });
-    var ys = corners.map(function (p) { return p[1]; });
-    var zs = corners.map(function (p) { return p[2]; });
-    var rng = function (arr) { return [Math.min.apply(null, arr), Math.max.apply(null, arr)]; };
-    var xr = rng(xs), yr = rng(ys), zr = rng(zs);
-    var a, b, plane;
-    if (n === '-y') { a = xr; b = zr; plane = yr[0]; }
-    else if (n === '+y') { a = xr; b = zr; plane = yr[1]; }
-    else if (n === '-x') { a = yr; b = zr; plane = xr[0]; }
-    else if (n === '+x') { a = yr; b = zr; plane = xr[1]; }
-    else if (n === '+z') { a = xr; b = yr; plane = zr[1]; }
-    else { a = xr; b = yr; plane = zr[0]; }
-    return {
-      id: port.id, face: n, a: a, b: b, plane: plane, round: !!port.round,
-      /* `expose:false` means "this opening is not needed" - a button under a
-       * thin wall, a horn inside the box. The layout may still want it. */
-      expose: port.expose === false ? false : true
-    };
-  }
-
-  function faceCorners(face, r, size) {
-    var u0 = Math.min(r[0], r[2]), u1 = Math.max(r[0], r[2]);
-    var v0 = Math.min(r[1], r[3]), v1 = Math.max(r[1], r[3]);
-    function at(u, v) {
-      if (face === '-y') return [u, 0, v];
-      if (face === '+y') return [u, size[1], v];
-      if (face === '-x') return [0, u, v];
-      if (face === '+x') return [size[0], u, v];
-      if (face === '+z') return [u, v, size[2]];
-      return [u, v, 0];
-    }
-    return [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)];
-  }
-
-  function rotNormal(face, m) {
-    var v = { '-y': [0, -1, 0], '+y': [0, 1, 0], '-x': [-1, 0, 0], '+x': [1, 0, 0],
-              '+z': [0, 0, 1], '-z': [0, 0, -1] }[face];
-    if (!v) return face;
-    var q = applyM(m, v);
-    if (Math.abs(q[0]) > 0.5) return q[0] > 0 ? '+x' : '-x';
-    if (Math.abs(q[1]) > 0.5) return q[1] > 0 ? '+y' : '-y';
-    return q[2] > 0 ? '+z' : '-z';
-  }
-
-  /* ------------------------------------------------------------------ *
-   * 7. Defaults and draft layout
+   * 3. Config
    * ------------------------------------------------------------------ */
   function defaults() {
     return {
       printer: { bed: [220, 220], layer: 0.2, minWall: 0.8 },
       base: { w: 90, d: 70, h: 40, wall: 2.4, floor: 2.0, fit: 0.4 },
-      lid: { on: true, thick: 2.4, lip: 3.0, lipWall: 2.0, vents: 0 },
-      style: { color: '#f4c542', accent: '#f59e0b', label: '' },
+      // form: the shape of the shell, as opposed to what goes in it.
+      //   round / roundZ / roundZBottom - corner and fillet radii
+      //   head   - the part that lifts off; null means a flat lid
+      //   features - additions and subtractions (a beak is a rounded box,
+      //             an eye socket is a sphere subtracted)
+      form: { round: 12, roundZ: 8, roundZBottom: 3, head: null, features: [] },
+      lid: { on: true, thick: 2.4, lip: 3.0, lipWall: 2.0 },
+      style: { color: '#f4c542', accent: '#f59e0b', paint: [] },
       margin: 0.4,
       reach: 8,
       parts: [],
@@ -815,34 +240,32 @@ var Enclosure = (function () {
 
   function merge(base, given) {
     var out = {};
-    function copy(o) { for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) out[k] = o[k]; }
+    function copy(o) { for (var kk in o) if (Object.prototype.hasOwnProperty.call(o, kk)) out[kk] = o[kk]; }
     copy(base);
     if (!given) return out;
     for (var k in given) {
       if (!Object.prototype.hasOwnProperty.call(given, k)) continue;
       var v = given[k];
       if (v && typeof v === 'object' && !Array.isArray(v) && out[k] && typeof out[k] === 'object' && !Array.isArray(out[k])) {
-        var m = {};
-        for (var kk in out[k]) m[kk] = out[k][kk];
-        for (var kk2 in v) m[kk2] = v[kk2];
+        var m = {}, kk2;
+        for (kk2 in out[k]) m[kk2] = out[k][kk2];
+        for (kk2 in v) m[kk2] = v[kk2];
         out[k] = m;
       } else out[k] = v;
     }
     return out;
   }
 
-  /* A draft layout: parts in a row along the back, as far from each other as
-   * their sizes allow. It is not a good design - it is a starting point that
-   * already passes the fit checks, so the assistant edits numbers instead of
-   * inventing them. */
+  /* A draft layout: parts in a row, as far from each other as their sizes
+   * allow. Not a design - a starting point that already passes the fit checks,
+   * so the author edits numbers instead of inventing them. */
   function init(dia) {
     var enc = defaults();
     var x = enc.base.wall + 2, y = enc.base.wall + 2, rowH = 0;
-    var w = enc.base.w;
     enc.parts = (dia.parts || []).map(function (p) {
       var dim = DIM[p.type];
       var size = dim ? dim.size : UNKNOWN_SIZE;
-      if (x + size[0] > w - enc.base.wall - 2) { x = enc.base.wall + 2; y += rowH + 3; rowH = 0; }
+      if (x + size[0] > enc.base.w - enc.base.wall - 2) { x = enc.base.wall + 2; y += rowH + 3; rowH = 0; }
       var at = [Math.round(x * 10) / 10, Math.round(y * 10) / 10, enc.base.floor + 0.5];
       x += size[0] + 3;
       rowH = Math.max(rowH, size[1]);
@@ -852,988 +275,1356 @@ var Enclosure = (function () {
   }
 
   /* ------------------------------------------------------------------ *
-   * 8. Cutouts: what the ports demand, plus what the designer asked for
+   * 4. Placing parts
    *
-   * The default is "cut where the part needs to see the world". A designer
-   * who wants an LED to glow through 1.2 mm of plastic sets expose:false and
-   * the hole disappears - and the access check stops complaining, because the
-   * requirement moved from geometry to intent.
+   * `at` is the minimum corner of the part's bounding box AFTER rotation, so a
+   * layout can be written without thinking about matrices: change `rot` and
+   * the box grows the other way, `at` stays the corner.
    * ------------------------------------------------------------------ */
-  function mkHole(a0, b0, a1, b1, round, margin) {
-    var m = margin == null ? 0.4 : margin;
-    var lo0 = Math.min(a0, a1) - m, lo1 = Math.max(a0, a1) + m;
-    var hi0 = Math.min(b0, b1) - m, hi1 = Math.max(b0, b1) + m;
-    return {
-      loop: round ? mkCircle(lo0, hi0, lo1, hi1) : mkRect(lo0, hi0, lo1, hi1),
-      aabb: [lo0, hi0, lo1, hi1],
-      round: !!round
-    };
+  function rotMat(rot) {
+    if (rot == null || rot === 0) return [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    if (typeof rot === 'number') {
+      var a = rot * Math.PI / 180, c = Math.round(Math.cos(a)), s = Math.round(Math.sin(a));
+      return [c, -s, 0, s, c, 0, 0, 0, 1];
+    }
+    var m = /^([xyz])(-?\d+)$/.exec(String(rot));
+    if (!m) return [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    var ang = Number(m[2]) * Math.PI / 180;
+    var cc = Math.round(Math.cos(ang)), ss = Math.round(Math.sin(ang));
+    if (m[1] === 'x') return [1, 0, 0, 0, cc, -ss, 0, ss, cc];
+    if (m[1] === 'y') return [cc, 0, ss, 0, 1, 0, -ss, 0, cc];
+    return [cc, -ss, 0, ss, cc, 0, 0, 0, 1];
   }
 
-  var FACE_KEY = { '-y': 'front', '+y': 'back', '-x': 'left', '+x': 'right', '+z': 'top', '-z': 'bottom' };
-  var FACE_LIST = ['front', 'back', 'left', 'right', 'top', 'bottom'];
+  function rotSize(size, M) {
+    // Bounding box of a rotated box: |matrix| times size.
+    return [
+      Math.abs(M[0]) * size[0] + Math.abs(M[1]) * size[1] + Math.abs(M[2]) * size[2],
+      Math.abs(M[3]) * size[0] + Math.abs(M[4]) * size[1] + Math.abs(M[5]) * size[2],
+      Math.abs(M[6]) * size[0] + Math.abs(M[7]) * size[1] + Math.abs(M[8]) * size[2]
+    ];
+  }
 
-  function autoCutouts(parts, cfg) {
-    var W = cfg.base.w, D = cfg.base.d, H = cfg.base.h, t = cfg.base.wall, f = cfg.base.floor;
-    var reach = cfg.reach == null ? 8 : cfg.reach;
-    var m = cfg.margin == null ? 0.4 : cfg.margin;
-    var out = { front: [], back: [], left: [], right: [], top: [], bottom: [] };
-    var gaps = [];
+  function rotNormal(face, M) {
+    var v = face === '-y' ? [0, -1, 0] : face === '+y' ? [0, 1, 0]
+      : face === '-x' ? [-1, 0, 0] : face === '+x' ? [1, 0, 0]
+        : face === '-z' ? [0, 0, -1] : [0, 0, 1];
+    return [
+      Math.round(M[0] * v[0] + M[1] * v[1] + M[2] * v[2]),
+      Math.round(M[3] * v[0] + M[4] * v[1] + M[5] * v[2]),
+      Math.round(M[6] * v[0] + M[7] * v[1] + M[8] * v[2])
+    ];
+  }
 
-    parts.forEach(function (p) {
-      p.ports.forEach(function (port) {
-        if (!port.expose) return;
-        var wall = FACE_KEY[port.face];
-        if (!wall) return;
-        /* How far the opening is from the wall it has to pierce. A USB socket
-           buried 20 mm inside the box is not "close enough": the plug cannot
-           reach it, so the hole would be decoration. */
-        var gap = {
-          '-y': p.box.y0 - t, '+y': (D - t) - p.box.y1,
-          '-x': p.box.x0 - t, '+x': (W - t) - p.box.x1,
-          '+z': H - p.box.z1, '-z': p.box.z0 - f
-        }[port.face];
-        /* How much of the part's own face the opening covers. This is what
-         * separates "an LED pressed into a 5 mm hole" from "a 28x55 board
-         * whose USB socket happens to line up with a hole": both report the
-         * same gap, but only the first one holds the part up. */
-        var faceArea = 0;
-        if (port.face === '-y' || port.face === '+y') faceArea = (p.box.x1 - p.box.x0) * (p.box.z1 - p.box.z0);
-        else if (port.face === '-x' || port.face === '+x') faceArea = (p.box.y1 - p.box.y0) * (p.box.z1 - p.box.z0);
-        else faceArea = (p.box.x1 - p.box.x0) * (p.box.y1 - p.box.y0);
-        var holeArea = Math.abs(port.a[1] - port.a[0]) * Math.abs(port.b[1] - port.b[0]);
-        var rec = {
-          part: p.id, port: port.id, face: port.face, gap: Math.round(gap * 10) / 10,
-          grip: faceArea > 1e-9 ? Math.min(1, Math.round(holeArea / faceArea * 100) / 100) : 0
+  function resolveParts(enc, dia) {
+    var byId = {};
+    (dia.parts || []).forEach(function (p) { byId[p.id] = p; });
+    return (enc.parts || []).map(function (entry) {
+      var dp = byId[entry.id];
+      var dim = DIM[(dp && dp.type) || entry.type] || null;
+      var size = (entry.size || (dim && dim.size) || UNKNOWN_SIZE).slice();
+      var M = rotMat(entry.rot);
+      var rs = rotSize(size, M);
+      var at = entry.at || [0, 0, 0];
+      return {
+        id: entry.id,
+        type: (dp && dp.type) || entry.type || '?',
+        known: !!dim,
+        rot: entry.rot || 0,
+        M: M,
+        size: size,
+        rsize: rs,
+        color: entry.color || (dim && dim.color) || '#64748b',
+        ports: (dim && dim.ports) || [],
+        box: { x0: at[0], y0: at[1], z0: at[2], x1: at[0] + rs[0], y1: at[1] + rs[1], z1: at[2] + rs[2] }
+      };
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 5. The shell as a distance field
+   *
+   * Order is deliberate:
+   *   outer - cavity     gives a wall of uniform thickness
+   *   + bosses, shelves  adds what holds the parts up
+   *   - holes            leaves openings the ports can see through
+   *   + features         the shape (beak, wings, eyes) - only after the
+   *                      functional surface exists, so a bump can never
+   *                      swallow a hole
+   *
+   * The cavity runs past the top of the base on purpose: the shell is open
+   * there, so "outer minus cavity" makes a rim instead of a ceiling.
+   * ------------------------------------------------------------------ */
+  function buildField(enc, dia) {
+    var b = enc.base, t = b.wall, f = b.floor;
+    var W = b.w, D = b.d, H = b.h;
+    var cx = W / 2, cy = D / 2;
+    var fm = enc.form || {};
+    var R = clamp(fm.round == null ? 12 : fm.round, 0.5, Math.min(W, D) / 2 - 0.5);
+    var rzT = clamp(fm.roundZ == null ? 8 : fm.roundZ, 0.5, H);
+    var rzB = clamp(fm.roundZBottom == null ? 3 : fm.roundZBottom, 0.2, H);
+    var head = fm.head && fm.head.on !== false ? fm.head : null;
+    var zDiv = head ? (head.div != null ? head.div : H) : H;
+    /* The cavity is the outer silhouette shrunk by one wall. The two corner
+     * arcs have to stay *concentric* for that to mean anything: a round
+     * outside and a square inside are two different curves, and the gap
+     * between them is somewhere thicker than the wall and somewhere thinner
+     * than it - a thin spot is a hole in the print. So the inner radius is
+     * the outer radius minus the wall, not a number picked to look tidy.
+     * (A smaller radius is still allowed - that is how you thicken a corner
+     * on purpose - but never a larger one.) */
+    var Rc = Math.min(Math.max(0.6, fm.cavRound == null ? R - t : fm.cavRound), Math.max(0.6, R - t)), rzTc = 1.2;
+    var over = fm.overhang == null ? 0.6 : Math.max(0.6, fm.overhang);
+
+    var parts = resolveParts(enc, dia);
+    var holes = holesFor(enc, parts, { W: W, D: D, H: H, zDiv: zDiv, wall: t });
+
+    var bx2 = W / 2, by2 = D / 2, bz2 = zDiv / 2;
+    var cx2 = W / 2 - t, cy2 = D / 2 - t;
+    var cavTop = H + 40, cavCZ = (f + cavTop) / 2, cavBZ = (cavTop - f) / 2;
+
+    var baseOuter = function (p) {
+      return sdRBoxAt(p[0], p[1], p[2], cx, cy, zDiv / 2, bx2, by2, bz2, R, rzT, rzB);
+    };
+    var baseCav = function (p) {
+      return sdRBoxAt(p[0], p[1], p[2], cx, cy, cavCZ, cx2, cy2, cavBZ, Rc, rzTc, 0);
+    };
+    /* The lateral skin: the outer silhouette in plan, with no top face.
+     *
+     * This is the surface the cavity has to stay inside, and it has to be
+     * *lateral* only. The base is open at the parting line on purpose - the
+     * cavity runs past the top so that "outer minus cavity" leaves a rim
+     * instead of a lid. Clip it with the whole outer form and the top face
+     * comes along, and "one wall inside the top face" is a horizontal plane
+     * 2.4 mm below the rim: an invisible ceiling. Every tall part then
+     * "does not fit" in a shell that has plenty of room, and the only way
+     * out is to shrink the part - which is how this used to lose a servo.
+     */
+    var baseSkin = function (p) {
+      var qx = Math.abs(p[0] - cx) - bx2 + R;
+      var qy = Math.abs(p[1] - cy) - by2 + R;
+      return Math.min(Math.max(qx, qy), 0) + hyp(Math.max(qx, 0), Math.max(qy, 0)) - R;
+    };
+
+    /* Every extra - a screw post, a shelf, a hole, a decorative bump - carries
+     * a bounding sphere. Once the distance to the cheap part of the field is
+     * larger than that sphere plus the answer so far, the extra cannot be the
+     * nearest surface and is skipped. Far away from the shell - which is most
+     * of every ray - nothing but the two rounded boxes gets evaluated, and the
+     * whole picture goes from 14 s to under 2. */
+    function couldTouch(q, p, d) {
+      var dx = p[0] - q.c[0], dy = p[1] - q.c[1], dz = p[2] - q.c[2];
+      var lim = q.rb + d;
+      return dx * dx + dy * dy + dz * dz < lim * lim;
+    }
+
+    var bossList = (enc.bosses || []).map(function (bs) {
+      var z1 = bs.h == null ? zDiv - f : bs.h;
+      return {
+        c: [bs.at[0], bs.at[1], (f + z1) / 2],
+        rb: hyp(bs.d / 2, (z1 - f) / 2) + 1,
+        fn: function (p) {
+          var outer = sdCylZ(p, [bs.at[0], bs.at[1], (f - 0.3 + z1) / 2], bs.d / 2, (z1 - f + 0.3) / 2);
+          // The hole stops 1 mm short of the post top: a through hole in a screw
+          // post is a hole the screw falls through.
+          var inner = sdCylZ(p, [bs.at[0], bs.at[1], z1 + 0.5], bs.hole / 2, z1 - f + 1);
+          return smax(outer, -inner, 0);
+        }
+      };
+    });
+
+    function makeShelves(want) {
+      return (enc.shelves || []).filter(function (sh) { return (sh.on === 'head') === want; }).map(function (sh) {
+        var x0 = sh.at[0], y0 = sh.at[1], x1 = x0 + sh.size[0], y1 = y0 + sh.size[1];
+        var th = sh.thick == null ? 2.4 : sh.thick;
+        return {
+          c: [(x0 + x1) / 2, (y0 + y1) / 2, sh.z - th / 2],
+          rb: hypot3((x1 - x0) / 2, (y1 - y0) / 2, th / 2) + 1,
+          fn: function (p) {
+            var dx = Math.abs(p[0] - (x0 + x1) / 2) - (x1 - x0) / 2;
+            var dy = Math.abs(p[1] - (y0 + y1) / 2) - (y1 - y0) / 2;
+            var dz = Math.abs(p[2] - (sh.z - th / 2)) - th / 2;
+            return hypot3(Math.max(dx, 0), Math.max(dy, 0), Math.max(dz, 0)) + Math.min(Math.max(dx, dy, dz), 0);
+          }
         };
-        gaps.push(rec);
-        if (gap > reach) { rec.blocked = true; return; }
-        var h = mkHole(port.a[0], port.b[0], port.a[1], port.b[1], port.round, m);
-        h.owner = p.id + ':' + port.id;
-        out[wall].push(h);
       });
-    });
-    return { holes: out, gaps: gaps };
-  }
+    }
+    var shelfList = makeShelves(false);
+    var headShelves = makeShelves(true);
 
-  function userCutouts(list, cfg) {
-    var out = { front: [], back: [], left: [], right: [], top: [], bottom: [] };
-    (list || []).forEach(function (c, i) {
-      var face = FACE_KEY[c.face];
-      if (!face) return;
-      var h = mkHole(c.rect[0], c.rect[1], c.rect[2], c.rect[3], c.round,
-                     c.margin == null ? (cfg.margin || 0.4) : c.margin);
-      h.owner = c.id || ('cutout#' + (i + 1));
-      out[face].push(h);
-    });
-    return out;
-  }
+    var feats = formFeatures(enc);
 
-  function mergeHoles(a, b) {
-    var out = {};
-    FACE_LIST.forEach(function (k) { out[k] = (a[k] || []).concat(b[k] || []); });
-    return out;
-  }
+    /* A hole is a prism along its face normal, clipped to the wall it crosses.
+     * `half` set means the prism is a rounded rectangle - the shape a slot
+     * should be, and a shape a circle can never be.
+     *
+     * The wall clip is not cosmetic. With an unbounded prism a USB opening in
+     * the front wall reams straight through the back wall as well: two holes
+     * for the price of one, in a place nothing asked for.
+     *
+     * The clip has to start *outside* the shape, not at the box face. A bill
+     * that overhangs by 15 mm, or a leg that reaches below the floor, leaves
+     * material in front of the opening's start plane - and a hole that begins
+     * inside a solid is a blind hole. `form.overhang` is that distance. */
+    function holeSpan(p, h) {
+      if (h.face === '-y' || h.face === '+y') return [p[0] - h.at[0], p[2] - h.at[2]];
+      if (h.face === '-x' || h.face === '+x') return [p[1] - h.at[1], p[2] - h.at[2]];
+      return [p[0] - h.at[0], p[1] - h.at[1]];
+    }
+    // how deep into the wall we are, measured from the outside surface
+    function wallDepth(p, h, inner) {
+      var w = h.wall == null ? t : h.wall;
+      var n = h.face === '-y' ? p[1] : h.face === '+y' ? D - p[1]
+        : h.face === '-x' ? p[0] : h.face === '+x' ? W - p[0]
+          : h.face === '-z' ? p[2] : H - p[2];
+      // `inner` is the band that is *wall*: not the opening's reach outside
+      // the shell, only the material itself. A grille bar lives there and
+      // nowhere else - a bar that reaches as far as the opening does hangs
+      // in the air in front of the shell as a sliver of nothing.
+      if (inner) return Math.max(-n, n - w);
+      return Math.max(-n - over, n - w - 0.6);
+    }
+    function holeDist(p, h) {
+      var s = holeSpan(p, h);
+      if (!h.half) return hyp(s[0], s[1]) - h.r;
+      var du = Math.abs(s[0]) - h.half[0], dv = Math.abs(s[1]) - h.half[1];
+      return Math.min(Math.max(du, dv), 0) + hyp(Math.max(du, 0), Math.max(dv, 0)) - h.round;
+    }
 
-  /* ------------------------------------------------------------------ *
-   * 9. The model
-   * ------------------------------------------------------------------ */
-  function move(sh, dx, dy, dz) {
-    for (var i = 0; i < sh.tris.length; i++) {
-      for (var k = 0; k < 3; k++) {
-        var p = sh.tris[i][k];
-        sh.tris[i][k] = [p[0] + dx, p[1] + dy, p[2] + dz];
+    function punch(d, p) {
+      for (var i = 0; i < holes.length; i++) {
+        var h = holes[i];
+        /* Skip on the band, not on the field value. Subtracting a hole can
+         * only push the field outwards, so a point outside the band - outside
+         * the wall the opening pierces - is untouched by it, whatever else is
+         * there. Testing "is the field value already large?" instead was
+         * wrong in a way that cost a blind hole: a point *inside* a bulge
+         * has a negative value, and that is exactly where an opening has to
+         * be cut. */
+        var slab = wallDepth(p, h);
+        if (slab > 0) continue;
+        var cut = Math.max(holeDist(p, h), slab);
+        d = Math.max(d, -cut);
+        /* Grille: thin bars left inside the opening. Sound still gets out and
+         * the hole stops reading as a black void in the preview. A bar is a
+         * plane in z intersected with the opening and the *wall* - and the
+         * wall band is the one that does not reach outside the shell. Use
+         * the opening's band instead and the bar runs out in front of the
+         * shell as a sliver of nothing, hanging in the air. */
+        if (h.bars) {
+          var v = holeSpan(p, h)[1];
+          var wall = wallDepth(p, h, true);
+          for (var bi = 0; bi < h.bars.length; bi++) {
+            var bar = Math.abs(v - h.bars[bi]) - (h.barT || 0.8);
+            d = Math.min(d, Math.max(Math.max(bar, cut), wall));
+          }
+        }
       }
+      return d;
     }
-  }
 
-  function volume(sh) {
-    var v = 0;
-    for (var i = 0; i < sh.tris.length; i++) {
-      var t = sh.tris[i];
-      v += dot(t[0], cross(t[1], t[2])) / 6;
+    function baseSdf(p) {
+      // Cut the cavity *after* the outside decoration, not before. A wing is
+      // an ellipsoid centred on the wall, so half of it is inside the box -
+      // blended in afterwards it fills 4 mm of the cavity back up and lands
+      // on top of whatever sits against that wall. Cutting last clips every
+      // bulge flush with the inner surface, which is what a real shell is.
+      var solid = decorate(baseOuter(p), p, [], feats.baseAdd);
+      /* The cavity has to stay inside the shell - but "inside the shell" is
+       * the lateral skin, not the whole outer form. Shrinking a *convex*
+       * shape pulls it in, but shrinking a *concave* one - the crease where
+       * the head melts into the back - pushes it out through the skin, and
+       * the shell ends up with a hole where the neck is. Clipping the cavity
+       * to the outer form minus one wall is what keeps the wall the same
+       * thickness everywhere, including in every valley.
+       *
+       * The clip is lateral on purpose: see baseSkin(). A clip that can see
+       * the top face of the base grows an invisible ceiling under the rim,
+       * and a part standing 22 mm tall does not fit under a ceiling that was
+       * never asked for. */
+      var cav = Math.max(baseCav(p), baseSkin(p) + t);
+      var d = Math.max(Math.max(solid, -cav), p[2] - zDiv);
+      var i;
+      for (i = 0; i < bossList.length; i++) if (couldTouch(bossList[i], p, d)) d = Math.min(d, bossList[i].fn(p));
+      for (i = 0; i < shelfList.length; i++) if (couldTouch(shelfList[i], p, d)) d = Math.min(d, shelfList[i].fn(p));
+      // Recesses go last: a carved groove has to be able to cut into a boss.
+      d = decorate(d, p, feats.baseSub, []);
+      return punch(d, p);
     }
-    return v;
-  }
 
-  function model(encGiven, dia) {
-    var enc = merge(defaults(), encGiven);
-    stitchFail = 0;
-    capFail = 0;
-    failNote = [];
-    /* A post exists to reach the lid, so its top defaults to the deck height:
-       the common case needs no number, and `h` stays available for a stub. */
-    enc.bosses = (enc.bosses || []).map(function (b, i) {
-      var o = {};
-      for (var k in b) if (Object.prototype.hasOwnProperty.call(b, k)) o[k] = b[k];
-      if (o.d == null) o.d = 6.5;
-      if (o.hole == null) o.hole = 3.2;
-      if (o.h == null) o.h = enc.base.h;
-      o.id = o.id || ('boss#' + (i + 1));
-      return o;
-    });
-    var parts = resolveParts(enc, dia || { parts: [] });
-    var auto = autoCutouts(parts, enc);
-    var holes = mergeHoles(auto.holes, userCutouts(enc.cutouts, enc));
-
-    var W = enc.base.w, D = enc.base.d, H = enc.base.h;
-    var t = enc.base.wall, f = enc.base.floor;
-    var shells = [];
-
-    shells.push(cup({
-      W: W, D: D, H: H, t: t, f: f, open: '+z',
-      holes: { bottom: holes.bottom, front: holes.front, back: holes.back,
-               left: holes.left, right: holes.right, top: [] },
-      name: 'base', color: enc.style.color, kind: 'base'
-    }));
-
-    /* Screw posts hold the lid on, so the lid needs a clearance hole in the
-     * same place. Punching it here - instead of asking the designer to keep
-     * two lists in sync - is what makes "bosses" a feature rather than a
-     * decorative cylinder: the bore in the post and the hole in the lid are
-     * derived from the same coordinate. */
-    (enc.bosses || []).forEach(function (b, i) {
-      if (!enc.lid.on) return;
-      var r = (b.hole == null ? 3.2 : b.hole) / 2 + 0.2;
-      var h = mkHole(b.at[0] - r, b.at[1] - r, b.at[0] + r, b.at[1] + r, true, 0);
-      h.owner = 'boss#' + (i + 1);
-      holes.top.push(h);
-    });
-
-    var lidH = 0;
-    if (enc.lid.on) {
-      lidH = enc.lid.thick + enc.lid.lip;
-      var lid = cup({
-        W: W, D: D, H: lidH, t: enc.lid.lipWall, f: enc.lid.thick, open: '-z',
-        holes: { top: holes.top, bottom: [], front: [], back: [], left: [], right: [] },
-        name: 'lid', color: enc.style.accent || enc.style.color, kind: 'lid'
+    var headSdf = null, headTop = H;
+    if (head) {
+      var blobs = (head.blobs || []).map(function (bl) {
+        // `kind` everywhere else in the file; `shape` was the old name and
+        // still reads better in a head definition, so both are accepted.
+        var isBox = (bl.shape || bl.kind) === 'box';
+        var rb = isBox ? hypot3(bl.size[0], bl.size[1], bl.size[2]) : Math.max(bl.size[0], bl.size[1], bl.size[2]);
+        /* A blob that is a box needs two different radii: the one in plan and
+         * the one in the vertical section. One radius cannot be both - a
+         * shape with a 14 mm plan radius is a lozenge, and a square cavity
+         * inside it cuts straight through the skin at the corners. */
+        var pr = bl.round == null ? 6 : bl.round;
+        var zr = bl.roundZ == null ? pr : bl.roundZ;
+        return {
+          c: bl.at, rb: rb,
+          f: isBox
+            ? function (p) { return sdRBoxAt(p[0], p[1], p[2], bl.at[0], bl.at[1], bl.at[2], bl.size[0], bl.size[1], bl.size[2], pr, zr, zr); }
+            : function (p) { return sdEllipsoid(p, bl.at, bl.size); },
+          blend: bl.blend == null ? 8 : bl.blend
+        };
       });
-      move(lid, 0, 0, H);
-      shells.push(lid);
+      var flange = function (p) {
+        // Same footprint as the base so the seam disappears into one line.
+        return sdRBoxAt(p[0], p[1], p[2], cx, cy, zDiv + t / 2, bx2, by2, t / 2, R, 1.2, 1.2);
+      };
+      /* A blob whose sphere is further than the answer so far cannot lower it
+       * by more than its own blend width, so it is skipped. Only the head
+       * part is sparse enough for this to matter; it is where the pixels are. */
+      var blobSolid = function (p, sofar) {
+        if (!blobs.length) return 1e9;
+        var lim = sofar == null ? 1e9 : sofar;
+        var d = 1e9;
+        for (var i = 0; i < blobs.length; i++) {
+          var q = blobs[i];
+          var dx = p[0] - q.c[0], dy = p[1] - q.c[1], dz = p[2] - q.c[2];
+          var reach2 = q.rb + lim + q.blend;
+          if (dx * dx + dy * dy + dz * dz > reach2 * reach2) continue;
+          d = i === 0 || d > 1e8 ? q.f(p) : smin(d, q.f(p), q.blend);
+        }
+        return d;
+      };
+      // A separate box-shaped cavity. Shrinking the outer form by one wall is
+      // wrong for a flat part: the ellipsoid's belly is far narrower than its
+      // equator, so a 45x20 sonar board physically does not fit inside a shape
+      // that "looks" big enough. Real shells solve this the other way round -
+      // square hollow, round outside, thicker corners.
+      var cavBox = null;
+      if (head.cav) {
+        var hcor = head.cav;
+        cavBox = function (p) {
+          return sdRBoxAt(p[0], p[1], p[2], hcor.at[0], hcor.at[1], hcor.at[2], hcor.size[0], hcor.size[1], hcor.size[2], hcor.round == null ? 2 : hcor.round, 2, 0);
+        };
+      }
+      var rimH = head.rim == null ? 3 : head.rim;
+      headSdf = function (p) {
+        var solid = smin(flange(p), blobSolid(p, null), head.flangeBlend == null ? 9 : head.flangeBlend);
+        // Same order as the base: bill and eyes belong to the outside, so the
+        // cavity gets the last word and every bulge ends flush with the wall.
+        solid = decorate(solid, p, [], feats.headAdd);
+        /* The wall has to vanish at the parting line, exactly as the base's
+         * does. A hollow shell cut flat at zDiv leaves a 2.4 mm ring of
+         * material with an open cross-section - the head mesh then has a
+         * boundary and is not printable as one solid. Tapering the inner
+         * surface out to the outer over rim mm turns that ring into a knife
+         * edge. A box cavity, when given, is only extra interior room: it is
+         * unioned in (min) but intersected with the outer (max), so it can
+         * widen the hollow without ever eating the wall. */
+        var rim = clamp((p[2] - zDiv) / rimH, 0, 1);
+        var hollow = solid + t * rim;
+        var cav = cavBox ? Math.min(hollow, Math.max(cavBox(p), solid)) : hollow;
+        var d = Math.max(Math.max(solid, -cav), zDiv - p[2]);
+        for (var si = 0; si < headShelves.length; si++) {
+          if (couldTouch(headShelves[si], p, d)) d = Math.min(d, headShelves[si].fn(p));
+        }
+        d = decorate(d, p, feats.headSub, []);
+        return punch(d, p);
+      };
+      headTop = zDiv + 8;
+      (head.blobs || []).forEach(function (bl) {
+        headTop = Math.max(headTop, zDiv + (bl.at[2] - zDiv) + bl.size[2]);
+      });
     }
 
-    (enc.bosses || []).forEach(function (b, i) {
-      var s = boss(b, f);
-      s.name = 'boss#' + (i + 1);
-      shells.push(s);
+    var partsSdf = parts.map(function (pt) {
+      var b2 = pt.box;
+      return function (p) {
+        return sdBox([p[0] - (b2.x0 + b2.x1) / 2, p[1] - (b2.y0 + b2.y1) / 2, p[2] - (b2.z0 + b2.z1) / 2],
+          [(b2.x1 - b2.x0) / 2, (b2.y1 - b2.y0) / 2, (b2.z1 - b2.z0) / 2], 0.6);
+      };
     });
 
-    var shelves = [];
-    (enc.shelves || []).forEach(function (cfg, i) {
-      if (!cfg.size || cfg.size.length < 2) {
-        problems.push({ k: 'shelf', msg: '第 ' + (i + 1) + ' 个层板缺少 size:[宽, 深]，没法建' });
-        return;
+    var showParts = false;
+    function map(p) {
+      var d = baseSdf(p);
+      if (headSdf) { var dh = headSdf(p); if (dh < d) d = dh; }
+      if (showParts) {
+        for (var i = 0; i < partsSdf.length; i++) { var dp = partsSdf[i](p); if (dp < d) d = dp; }
       }
-      var sh = shelfShell(cfg, enc);
-      sh.name = cfg.id || ('shelf#' + (i + 1));
-      shelves.push(sh);
-      shells.push(sh);
-    });
+      return d;
+    }
+    function matAt(p) {
+      var d = baseSdf(p), id = 0;
+      if (headSdf) { var dh = headSdf(p); if (dh < d) d = dh; }
+      if (showParts) for (var i = 0; i < partsSdf.length; i++) {
+        var dp = partsSdf[i](p); if (dp < d) { d = dp; id = i + 1; }
+      }
+      return id;
+    }
 
-    /* The strip triangulator cuts a face's border at every hole height, so a
-     * wall next to it has a vertex sitting mid-edge. Weld those before
-     * measuring anything, otherwise the closure check reports the seam - and
-     * a slicer would too. */
-    shells.forEach(function (s) {
-      for (var pass = 0; pass < 12; pass++) if (!weldTJunctions(s)) break;
-    });
-
-    /* A shell built inside-out has the right shape and the wrong normals,
-     * which reads as a black model. Flip by signed volume instead of auditing
-     * every cap by hand. */
-    shells.forEach(function (s) {
-      if (volume(s) < 0) s.tris.forEach(function (tr) { var tmp = tr[1]; tr[1] = tr[2]; tr[2] = tmp; });
-    });
-
-    var stats = {
-      shells: shells.length, tris: 0, volume: 0, closed: true,
-      bbox: [W, D, H + lidH], lid: !!enc.lid.on
+    return {
+      map: map, matAt: matAt, baseMap: baseSdf, headMap: headSdf,
+      setShowParts: function (v) { showParts = !!v; },
+      W: W, D: D, H: H, topZ: headTop, zDiv: zDiv,
+      parts: parts, holes: holes,
+      hasHead: !!head
     };
-    shells.forEach(function (s) { stats.tris += s.tris.length; stats.volume += volume(s); });
+  }
 
-    var problems = [], warns = [];
-    if (stitchFail) {
-      problems.push({ k: 'mesh',
-        msg: '有 ' + stitchFail + ' 个开口没能接进面板的三角化：同一面上开口太多，桥接线找不到不穿孔的落点。' +
-             '把相邻开口合并成一条长槽，或把它们分到不同面上——闭合检查也会同时报错，不要带着它去打印' });
-    }
-    if (capFail) {
-      problems.push({ k: 'mesh',
-        msg: '有 ' + capFail + ' 个面三角化后的面积对不上它应有的面积（' + failNote.slice(0, 3).join('；') +
-             '）—— 面会重叠或漏空，打印出来是破的' });
-    }
-    checkParts(enc, dia || { parts: [] }, parts, problems, warns);
-    checkBosses(enc, parts, problems, warns);
-    checkShelves(enc, shelves, parts, problems, warns);
-    /* checkHoles() is what marks each port as `cut`, and "gripped by a hole"
-     * is one of the four ways a part stays put - so support has to be decided
-     * AFTER the holes are resolved, or every panel-mounted part looks like it
-     * is floating. */
-    checkHoles(holes, enc, auto.gaps, problems, warns);
-    checkSupport(enc, parts, shelves, auto.gaps, problems, warns);
-    checkMesh(shells, stats, problems);
-    checkPrint(enc, holes, stats, problems, warns);
+  /* Decoration lives in enclosure.json so a shape is data, not code - and so
+   * check() can still tell whether the functional surface is intact. `on`
+   * picks which shell carries the feature; a bump added to the base when the
+   * beak belongs to the head would simply not be there after assembly. */
+  function formFeatures(enc) {
+    var list = (enc.form && enc.form.features) || [];
+    var out = { baseAdd: [], baseSub: [], headAdd: [], headSub: [] };
+    list.forEach(function (ft) {
+      var fn, rb;
+      if (ft.kind === 'ellipsoid') { fn = function (p) { return sdEllipsoid(p, ft.at, ft.size); }; rb = Math.max(ft.size[0], ft.size[1], ft.size[2]); }
+      else if (ft.kind === 'box') { fn = function (p) { return sdBox(sub(p, ft.at), ft.size, ft.round == null ? 2 : ft.round); }; rb = hypot3(ft.size[0], ft.size[1], ft.size[2]); }
+      else if (ft.kind === 'cone') { fn = function (p) { return sdConeZ(p, ft.at, ft.r1, ft.r2, ft.h); }; rb = hyp(Math.max(ft.r1, ft.r2), ft.h); }
+      else if (ft.kind === 'sphere') {
+        /* `r` is the documented key, but a `size:[r,r,r]` is an easy slip and
+         * an undefined radius does not fail loudly - it makes the whole head
+         * field NaN, and a NaN field is silently hidden, so the shell just
+         * disappears from the picture and the preview shows only the base.
+         * Accept either, and never let a missing radius reach the arithmetic. */
+        var sr = ft.r != null ? ft.r : (ft.size ? (Array.isArray(ft.size) ? (ft.size[0] + ft.size[1] + ft.size[2]) / 3 : ft.size) : 0);
+        fn = (function (rr) { return function (p) { return hypot3(p[0] - ft.at[0], p[1] - ft.at[1], p[2] - ft.at[2]) - rr; }; })(sr);
+        rb = sr;
+      }
+      else return;
+      var item = { fn: fn, blend: ft.blend || 0, c: ft.at, rb: rb };
+      var key = (ft.op === 'sub' ? 'sub' : 'add');
+      var onHead = ft.on === 'head';
+      out[(onHead ? 'head' : 'base') + (key === 'sub' ? 'Sub' : 'Add')].push(item);
+    });
+    return out;
+  }
 
-    return { enc: enc, parts: parts, holes: holes, gaps: auto.gaps,
-             shelves: shelves, shells: shells,
-             problems: problems, warns: warns, stats: stats };
+  /* smin(a, b, k) cannot change `a` by more than k, so a feature whose
+   * bounding sphere is further away than d + k is not worth evaluating. The
+   * same test covers smax() for the recesses. */
+  function decorate(d, p, subs, adds) {
+    var i, q, dx, dy, dz, lim;
+    for (i = 0; i < subs.length; i++) {
+      q = subs[i]; lim = q.rb + d + (q.blend || 0);
+      dx = p[0] - q.c[0]; dy = p[1] - q.c[1]; dz = p[2] - q.c[2];
+      if (dx * dx + dy * dy + dz * dz > lim * lim) continue;
+      d = smax(d, -q.fn(p), q.blend);
+    }
+    for (i = 0; i < adds.length; i++) {
+      q = adds[i]; lim = q.rb + d + (q.blend || 0);
+      dx = p[0] - q.c[0]; dy = p[1] - q.c[1]; dz = p[2] - q.c[2];
+      if (dx * dx + dy * dy + dz * dz > lim * lim) continue;
+      d = smin(d, q.fn(p), q.blend);
+    }
+    return d;
   }
 
   /* ------------------------------------------------------------------ *
-   * 10. Checks
+   * 6. Where the holes go
    *
-   * Every one of these corresponds to a way a printed enclosure actually
-   * fails: a part with no room, two parts in the same space, a port facing
-   * solid plastic, a face that did not triangulate, a wall thinner than one
-   * nozzle pass. None of them is cosmetic.
+   * Two sources, in order of authority: explicit `cutouts`, then whatever the
+   * ports demand. A port marked expose:false is a requirement that moved from
+   * geometry to intent - the LED glows through the plastic on purpose - so it
+   * asks for nothing here.
    * ------------------------------------------------------------------ */
-  function checkParts(enc, dia, parts, problems, warns) {
-    var inDia = {}, inEnc = {};
-    (dia.parts || []).forEach(function (p) { inDia[p.id] = p; });
-    (enc.parts || []).forEach(function (p) { inEnc[p.id] = p; });
+  function holesFor(enc, parts, dims) {
+    var W = dims.W, D = dims.D, zDiv = dims.zDiv, wall = dims.wall;
+    var m = enc.margin == null ? 0.4 : enc.margin;
+    var reach = enc.reach == null ? 8 : enc.reach;
+    var out = [];
 
-    Object.keys(inDia).forEach(function (id) {
-      if (!inEnc[id]) {
-        problems.push({ k: 'missing-part',
-          msg: id + ' 在 diagram.json 里，enclosure.json 却没给它留位置 —— 外壳装不进它' });
-      }
-    });
-    Object.keys(inEnc).forEach(function (id) {
-      if (!inDia[id]) {
-        problems.push({ k: 'stray-part',
-          msg: 'enclosure.json 里的 ' + id + ' 在 diagram.json 里不存在（改名了？还是多写了一个？）' });
-      }
-    });
-    parts.forEach(function (p) {
-      if (!p.known) {
-        warns.push(p.type + ' 不在尺寸表里，按 ' + UNKNOWN_SIZE.join('×') + ' mm 估算 —— 请用卡尺确认后再打印');
-      }
-    });
+    function push(face, at, r, extra) {
+      var h = { face: face, at: at, r: r, wall: wall };
+      if (extra) for (var k in extra) if (extra[k] !== null) h[k] = extra[k];
+      out.push(h);
+    }
 
-    var W = enc.base.w, D = enc.base.d, H = enc.base.h;
-    var t = enc.base.wall, f = enc.base.floor, fit = enc.base.fit;
-    var lidRoom = enc.lid.on ? enc.lid.lip : 0;
-
-    parts.forEach(function (p) {
-      var b = p.box, bad = [];
-      if (b.x0 < t + fit - 1e-6) bad.push('左 ' + (t + fit - b.x0).toFixed(1));
-      if (b.x1 > W - t - fit + 1e-6) bad.push('右 ' + (b.x1 - (W - t - fit)).toFixed(1));
-      if (b.y0 < t + fit - 1e-6) bad.push('前 ' + (t + fit - b.y0).toFixed(1));
-      if (b.y1 > D - t - fit + 1e-6) bad.push('后 ' + (b.y1 - (D - t - fit)).toFixed(1));
-      if (b.z0 < f - 1e-6) bad.push('底 ' + (f - b.z0).toFixed(1));
-      if (b.z1 > H + lidRoom - 1e-6) bad.push('顶 ' + (b.z1 - (H + lidRoom)).toFixed(1));
-      if (bad.length) {
-        problems.push({ k: 'outside',
-          msg: p.id + ' 超出内腔 ' + bad.join(' / ') + ' mm（' + p.size.map(function (n) { return n.toFixed(1); }).join('×') + ' mm）' });
-      }
+    (enc.cutouts || []).forEach(function (c) {
+      var R2 = c.rect, pad = c.margin == null ? m : c.margin;
+      var a = Math.abs(R2[2] - R2[0]) / 2 + pad, b = Math.abs(R2[3] - R2[1]) / 2 + pad;
+      var at;
+      if (c.face === '-y') at = [(R2[0] + R2[2]) / 2, 0, (R2[1] + R2[3]) / 2];
+      else if (c.face === '+y') at = [(R2[0] + R2[2]) / 2, D, (R2[1] + R2[3]) / 2];
+      else if (c.face === '-x') at = [0, (R2[0] + R2[2]) / 2, (R2[1] + R2[3]) / 2];
+      else if (c.face === '+x') at = [W, (R2[0] + R2[2]) / 2, (R2[1] + R2[3]) / 2];
+      else return;
+      /* A slot stays a slot. Turning a 4 x 14 vent into the circle that
+       * encloses it was the reason two vents 3 mm apart merged into one
+       * hole: r = max(halfWidth, halfHeight) is the *circumscribed* circle. */
+      push(c.face, at, hyp(a, b), {
+        half: [a, b], round: c.round == null ? 0.8 : c.round,
+        bars: c.bars || null, barT: c.barT
+      });
     });
 
-    for (var i = 0; i < parts.length; i++) {
-      for (var j = i + 1; j < parts.length; j++) {
-        var A = parts[i].box, B = parts[j].box;
+    parts.forEach(function (pt) {
+      (pt.ports || []).forEach(function (port) {
+        if (port.expose === false) return;
+        var n = rotNormal(port.face, pt.M);
+        var bx = pt.box;
+        var face = null, along = null;
+        if (n[1] === -1) { face = '-y'; }
+        else if (n[1] === 1) { face = '+y'; }
+        else if (n[0] === -1) { face = '-x'; }
+        else if (n[0] === 1) { face = '+x'; }
+        else if (n[2] === -1) { face = '-z'; }
+        else return;   // ports facing the lid are the lid's problem, not a wall hole
+
+        /* Where on the wall the opening lands. A port's rect is given in the
+         * part's own frame, so it has to be rotated with the part before it
+         * can be laid on a wall: a sonar's two transducers are 22 mm apart
+         * inside the board, and dropping both at the box centre put them in
+         * the same hole. */
+        var rec = port.rect || [0, 0, 4, 4];
+        /* The rect's two axes are the *face's* axes, not always x and z: on a
+         * face looking along z the two spans are x and y. Reading them as
+         * x and z put a servo horn 5 mm off its own shaft. */
+        var su = (port.face === '-x' || port.face === '+x') ? pt.size[1] : pt.size[0];
+        var sv = (port.face === '-z' || port.face === '+z') ? pt.size[1] : pt.size[2];
+        var u = (rec[0] + rec[2]) / 2 - su / 2;
+        var v = (rec[1] + rec[3]) / 2 - sv / 2;
+        var along2 = (rec[2] - rec[0]) / 2, tall2 = (rec[3] - rec[1]) / 2;
+        var lx, ly, lz;
+        if (port.face === '-y' || port.face === '+y') { lx = u; ly = 0; lz = v; }
+        else if (port.face === '-x' || port.face === '+x') { lx = 0; ly = u; lz = v; }
+        else { lx = u; ly = v; lz = 0; }
+        var M = pt.M;
+        var dx = M[0] * lx + M[1] * ly + M[2] * lz;
+        var dy = M[3] * lx + M[4] * ly + M[5] * lz;
+        var dz = M[6] * lx + M[7] * ly + M[8] * lz;
+        var c0 = [(bx.x0 + bx.x1) / 2 + dx, (bx.y0 + bx.y1) / 2 + dy, (bx.z0 + bx.z1) / 2 + dz];
+
+        var at, r, half = null;
+        if (face === '-y' || face === '+y') { at = [c0[0], face === '-y' ? 0 : D, c0[2]]; }
+        else if (face === '-x' || face === '+x') { at = [face === '-x' ? 0 : W, c0[1], c0[2]]; }
+        else { at = [c0[0], c0[1], 0]; }
+        if (port.round) {
+          r = Math.max(along2, tall2) + m;
+        } else {
+          // One of the two spans is horizontal on the wall, the other vertical.
+          var hx = Math.abs(M[0]) * along2 + Math.abs(M[1]) * tall2;
+          var hy = Math.abs(M[3]) * along2 + Math.abs(M[4]) * tall2;
+          var hz = Math.abs(M[6]) * along2 + Math.abs(M[7]) * tall2;
+          var a2, b2;
+          if (face === '-y' || face === '+y') { a2 = hx + m; b2 = hz + m; }
+          else if (face === '-x' || face === '+x') { a2 = hy + m; b2 = hz + m; }
+          else { a2 = hx + m; b2 = hy + m; }
+          half = [Math.max(a2, 0.6), Math.max(b2, 0.6)];
+          r = hyp(half[0], half[1]);
+        }
+
+        var near = face === '-y' ? bx.y0 : face === '+y' ? D - bx.y1
+          : face === '-x' ? bx.x0 : face === '+x' ? W - bx.x1 : bx.z0;
+        if (near > reach) return;   // not against this wall, so not its hole
+        // Keep the opening on one side of the parting line: a hole split in
+        // half by the seam cannot be assembled back into a circle.
+        if (face !== '-z' && at[2] - r < zDiv - 1 && at[2] + r > zDiv + 1) return;
+        push(face, at, r, half ? { half: half, round: port.round === true ? 0 : 0.6 } : null);
+      });
+    });
+
+    return out;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 7. Checks
+   *
+   * These run on the field, not on a mesh: a mesh is an approximation of it,
+   * and the failures worth catching (a part 0.2 mm inside a wall) are smaller
+   * than one triangle.
+   * ------------------------------------------------------------------ */
+  function model(enc, dia) {
+    var f = buildField(enc, dia);
+    var problems = [], warns = [];
+    var stats = { parts: f.parts.length, shells: f.hasHead ? 2 : 1, holes: f.holes.length, wall: enc.base.wall };
+
+    f.parts.forEach(function (p) {
+      if (!p.known) warns.push({ k: 'dim', msg: p.id + ' (' + p.type + ') 没有实测尺寸，按 ' + UNKNOWN_SIZE.join('x') + ' mm 的盒子处理' });
+    });
+
+    var shelves = (enc.shelves || []).map(function (s) {
+      return {
+        id: s.id || 'shelf',
+        z1: s.z, x0: s.at[0], y0: s.at[1],
+        x1: s.at[0] + s.size[0], y1: s.at[1] + s.size[1]
+      };
+    });
+    /* What a part stands on, if anything. Used twice: once to decide whether
+     * the part is supported, and once to excuse its underside from the
+     * interference test. A part resting on the floor touches the floor - the
+     * distance there is 0 by construction, and reporting that as "only 0.00
+     * mm of clearance" trains the reader to ignore the warning. */
+    function restingOn(p) {
+      var b = p.box, tol = 0.6;
+      if (Math.abs(b.z0 - enc.base.floor) <= tol) return enc.base.floor;
+      var i;
+      for (i = 0; i < shelves.length; i++) {
+        var s = shelves[i];
+        if (Math.abs(b.z0 - s.z1) <= tol && b.x0 < s.x1 - 1 && b.x1 > s.x0 + 1 && b.y0 < s.y1 - 1 && b.y1 > s.y0 + 1) return s.z1;
+      }
+      for (i = 0; i < f.parts.length; i++) {
+        var q = f.parts[i];
+        if (q.id === p.id) continue;
+        var qb = q.box;
+        if (Math.abs(b.z0 - qb.z1) <= tol && b.x0 < qb.x1 - 1 && b.x1 > qb.x0 + 1 && b.y0 < qb.y1 - 1 && b.y1 > qb.y0 + 1) return qb.z1;
+      }
+      return null;
+    }
+
+    // -- parts vs shell: sample corners, edges' midpoints and centres
+    f.parts.forEach(function (p) {
+      var b = p.box, worst = 1e9, at = null;
+      var rs = restingOn(p);
+      var xs = [b.x0, (b.x0 + b.x1) / 2, b.x1], ys = [b.y0, (b.y0 + b.y1) / 2, b.y1], zs = [b.z0, (b.z0 + b.z1) / 2, b.z1];
+      for (var i = 0; i < 3; i++) for (var j = 0; j < 3; j++) for (var k = 0; k < 3; k++) {
+        if (k === 0 && rs !== null && Math.abs(b.z0 - rs) < 0.05) continue;  // underside: touching is the point
+        var q = [xs[i], ys[j], zs[k]];
+        var d = f.map(q);
+        if (d < worst) { worst = d; at = q; }
+      }
+      if (worst < -0.05) {
+        problems.push({ k: 'interfere', msg: p.id + ' 和壳体干涉：(' + at.map(function (v) { return Math.round(v * 10) / 10; }).join(', ') + ') 处距表面 ' + worst.toFixed(2) + ' mm' });
+      } else if (worst < 0.2) {
+        warns.push({ k: 'tight', msg: p.id + ' 只有 ' + worst.toFixed(2) + ' mm 余量' });
+      }
+    });
+
+    // -- parts vs parts
+    for (var a = 0; a < f.parts.length; a++) {
+      for (var b2 = a + 1; b2 < f.parts.length; b2++) {
+        var A = f.parts[a].box, B = f.parts[b2].box;
         var ox = Math.min(A.x1, B.x1) - Math.max(A.x0, B.x0);
         var oy = Math.min(A.y1, B.y1) - Math.max(A.y0, B.y0);
         var oz = Math.min(A.z1, B.z1) - Math.max(A.z0, B.z0);
         if (ox > 0.05 && oy > 0.05 && oz > 0.05) {
-          problems.push({ k: 'interfere',
-            msg: parts[i].id + ' 和 ' + parts[j].id + ' 占用了同一块空间 ' +
-                 [ox, oy, oz].map(function (n) { return n.toFixed(1); }).join('×') + ' mm —— 真机装不进去' });
+          problems.push({ k: 'overlap', msg: f.parts[a].id + ' 和 ' + f.parts[b2].id + ' 相交 ' + Math.min(ox, oy, oz).toFixed(1) + ' mm' });
         }
       }
     }
-  }
 
-  /* A shelf holds something up, so it has to be held up itself.
-   *
-   * Three ways a shelf is wrong, none of which the picture shows:
-   *   - it does not touch a wall: it hangs in the air with the part on it
-   *   - it pokes through the wall: it is not inside the cavity
-   *   - it cuts through a part: the board has to be somewhere else
-   * A shelf is also printable only because it grows from a vertical wall; a
-   * shelf floating in the middle would need supports, which is a different
-   * design, so the wall test is a hard failure and not a warning. */
-  function checkShelves(enc, shelves, parts, problems) {
-    var W = enc.base.w, D = enc.base.d, H = enc.base.h, t = enc.base.wall, f = enc.base.floor;
-    shelves.forEach(function (sh) {
-      var m = sh.meta;
-      if (!m.bites.length) {
-        problems.push({ k: 'shelf',
-          msg: sh.name + ' 没有贴着任何一面墙（x ' + m.x0.toFixed(1) + '–' + m.x1.toFixed(1) +
-               ' / y ' + m.y0.toFixed(1) + '–' + m.y1.toFixed(1) + '）—— 它会悬在半空，打印时也没有落脚点' });
-      }
-      if (m.x0 < t - 0.4 || m.x1 > W - t + 0.4 || m.y0 < t - 0.4 || m.y1 > D - t + 0.4) {
-        problems.push({ k: 'shelf', msg: sh.name + ' 戳出了内腔，会和侧壁叠在一起' });
-      }
-      if (m.z0 < f - 1e-6 || m.z1 > H - 1e-6) {
-        problems.push({ k: 'shelf', msg: sh.name + ' 的高度 ' + m.z0.toFixed(1) + '–' + m.z1.toFixed(1) +
-          ' mm 不在内腔高度 ' + f + '–' + H + ' mm 之内' });
-      }
-      parts.forEach(function (p) {
-        var b = p.box;
-        var ox = Math.min(b.x1, m.x1) - Math.max(b.x0, m.x0);
-        var oy = Math.min(b.y1, m.y1) - Math.max(b.y0, m.y0);
-        var oz = Math.min(b.z1, m.z1) - Math.max(b.z0, m.z0);
-        if (ox > 0.05 && oy > 0.05 && oz > 0.05) {
-          problems.push({ k: 'shelf',
-            msg: sh.name + ' 和 ' + p.id + ' 抢同一块空间（' + [ox, oy, oz].map(function (n) { return n.toFixed(1); }).join('×') +
-                 ' mm）—— 层板要么挪高，要么让器件换个位置' });
-        }
-      });
-    });
-  }
-
-  /* Is every part actually held?
-   *
-   * "It is inside the box" is not the same as "it stays where it is". A part
-   * floating 3 mm above the floor passes every fit test in this file and still
-   * cannot be assembled: it drops the moment the box is turned over. Four
-   * things can hold a part, and they are the four things a real build uses:
-   *
-   *   the floor, a shelf, another part's top face, or a hole in a wall it is
-   *   pressed into (an LED in a 5 mm hole does not need a bracket).
-   *
-   * The test is deliberately loose (0.8 mm of slop, 55% footprint overlap) so
-   * that it fires on "drawn in mid-air" and not on "sits 0.2 mm off". */
-  function checkSupport(enc, parts, shelves, gaps, problems, warns) {
-    var f = enc.base.floor, t = enc.base.wall, W = enc.base.w, D = enc.base.d;
-    var SLOP = 0.8;
-
-    function footOverlap(a, b) {
-      var ox = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
-      var oy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
-      if (ox <= 0 || oy <= 0) return 0;
-      var fa = (a.x1 - a.x0) * (a.y1 - a.y0);
-      return fa > 1e-9 ? (ox * oy) / fa : 0;
-    }
-
-    var pressed = {};
-    (gaps || []).forEach(function (g) {
-      if (!g.cut) return;
-      if (g.face === '+z' || g.face === '-z') return;     // floor/lid ports are not wall grips
-      /* The opening has to be a fit for the part, not merely aligned with it.
-         At 35% of the part's face it is a panel hole the part drops into; a
-         USB socket in a 28 mm board is 20%, and a board is not held by a hole. */
-      if (g.gap <= 2.0 && g.grip >= 0.35) pressed[g.part] = g;
-    });
-
-    parts.forEach(function (p) {
+    /* A part pressed into an opening in a side wall is held by the wall, not the
+     * floor - an LED in a 5 mm hole does not need a bracket, and a sensor whose
+     * transducers look out of the front panel is held exactly by that panel.
+     * This is the fourth of the four ways a real build keeps a part put, and
+     * the only one the floor / shelf / wall-box tests miss. A part whose lens
+     * or transducer faces a wall and sits within reach of it, with a hole cut
+     * in that wall under the part, is gripped. */
+    function pressedIntoWall(p) {
       var b = p.box;
-      if (b.z0 <= f + SLOP) return;                       // on the floor
-      if (pressed[p.id]) return;                          // gripped by a wall hole
+      var reach = (enc.reach == null ? 8 : enc.reach);
+      for (var pi = 0; pi < (p.ports || []).length; pi++) {
+        var port = p.ports[pi];
+        if (port.expose === false) continue;
+        var n = rotNormal(port.face, p.M);
+        var face = n[1] === -1 ? '-y' : n[1] === 1 ? '+y' : n[0] === -1 ? '-x' : n[0] === 1 ? '+x' : null;
+        if (!face) continue;
+        var near = face === '-y' ? b.y0 : face === '+y' ? (enc.base.d - b.y1)
+          : face === '-x' ? b.x0 : (enc.base.w - b.x1);
+        if (near > enc.base.wall + 3) continue;   // gap too wide to grip
+        var px = (face === '-y' || face === '+y') ? (b.x0 + b.x1) / 2 : (b.y0 + b.y1) / 2;
+        var pz = (b.z0 + b.z1) / 2;
+        for (var hi = 0; hi < f.holes.length; hi++) {
+          var h = f.holes[hi];
+          if (h.face !== face) continue;
+          var hx = (face === '-y' || face === '+y') ? h.at[0] : h.at[1];
+          var hz = h.at[2];
+          var r = h.half ? Math.max(h.half[0], h.half[1]) : h.r;
+          if (Math.abs(hx - px) <= r + 3 && Math.abs(hz - pz) <= r + 3) return true;
+        }
+      }
+      return false;
+    }
 
-      var held = false;
-      shelves.forEach(function (sh) {
-        if (held) return;
-        if (Math.abs(sh.meta.z1 - b.z0) > SLOP) return;
-        if (footOverlap(b, sh.meta) >= 0.55) held = true;
+    // -- support: everything stands on something
+    f.parts.forEach(function (p) {
+      var b = p.box;
+      var onFloor = Math.abs(b.z0 - enc.base.floor) <= 0.6;
+      var onSomething = restingOn(p) !== null;
+      var held = b.y0 <= enc.base.wall + 0.6 || b.x0 <= enc.base.wall + 0.6 || pressedIntoWall(p);
+      if (!onFloor && !onSomething && !held) {
+        problems.push({ k: 'support', msg: p.id + ' 悬空：底部 z=' + b.z0.toFixed(1) + ' 没有落在底板、层板或别的器件上' });
+      }
+    });
+
+    shelves.forEach(function (s) {
+      var bites = s.x0 <= enc.base.wall + 0.6 || s.y0 <= enc.base.wall + 0.6
+        || s.x1 >= enc.base.w - enc.base.wall - 0.6 || s.y1 >= enc.base.d - enc.base.wall - 0.6;
+      if (!bites) problems.push({ k: 'shelf', msg: s.id + ' 没有搭在墙上，悬在空中' });
+    });
+
+    // -- every hole must actually be open: probe just outside the wall
+    f.holes.forEach(function (h, i) {
+      var opened = 0;
+      [[-0.55, 0], [0.55, 0], [0, -0.55], [0, 0.55]].forEach(function (o) {
+        var q = [h.at[0] + o[0] * h.r, h.at[1], h.at[2] + o[1] * h.r];
+        if (h.face === '-y') q[1] = -0.6;
+        else if (h.face === '+y') q[1] = enc.base.d + 0.6;
+        else if (h.face === '-x') q[0] = -0.6;
+        else if (h.face === '+x') q[0] = enc.base.w + 0.6;
+        else q[2] = -0.6;
+        if (f.map(q) > 0) opened++;
       });
-      if (!held) {
-        parts.forEach(function (q) {
-          if (held || q === p) return;
-          var ob = q.box;
-          if (Math.abs(ob.z1 - b.z0) > SLOP) return;
-          if (footOverlap(b, ob) < 0.55) return;
-          /* A part standing on another part is only real if the one below is
-             itself supported - otherwise it is two things falling together.
-             One level of recursion is enough: the floor always terminates it. */
-          held = ob.z0 <= f + SLOP || shelves.some(function (sh) {
-            return Math.abs(sh.meta.z1 - ob.z0) <= SLOP && footOverlap(ob, sh.meta) >= 0.55;
-          });
-        });
-      }
-      if (!held) {
-        problems.push({ k: 'floating',
-          msg: p.id + ' 悬空：底面在 z=' + b.z0.toFixed(1) + ' mm，下面既没有底板、也没有层板或别的器件托住 —— ' +
-               '装进壳里会掉下来。把它放到底板上，或用 shelves 给它加一块层板' });
-      }
-    });
-  }
-
-  /* A screw post is a promise: "the lid bolts down here". Three ways that
-   * promise breaks, all of them invisible in a render:
-   *   - the circle leaves the box (it is drawn, and it prints in mid-air)
-   *   - it stands inside a part's footprint (the board cannot sit on top of it)
-   *   - it stops short of the lid (you cannot put a screw into a gap)
-   */
-  function checkBosses(enc, parts, problems, warns) {
-    var list = enc.bosses || [];
-    var W = enc.base.w, D = enc.base.d, H = enc.base.h;
-    var boxes = list.map(function (b) {
-      var r = b.d / 2;
-      return { b: b, x0: b.at[0] - r, x1: b.at[0] + r, y0: b.at[1] - r, y1: b.at[1] + r };
+      if (!opened) problems.push({ k: 'hole', msg: '孔 #' + (i + 1) + '（' + h.face + '，' + h.at.map(function (v) { return Math.round(v); }).join(',') + '）没有打通：外面仍是实体' });
     });
 
-    boxes.forEach(function (bb) {
-      if (bb.x0 < 0 || bb.y0 < 0 || bb.x1 > W || bb.y1 > D) {
-        problems.push({ k: 'boss',
-          msg: bb.b.id + ' 圆心 (' + bb.b.at.join(', ') + ') 半径 ' + (bb.b.d / 2).toFixed(1) +
-               ' mm 伸出外廓 ' + W + '×' + D + ' mm 之外，这一圈会打印在空气里' });
-      }
-      if (enc.lid.on && bb.b.h < H - 0.2) {
-        problems.push({ k: 'boss',
-          msg: bb.b.id + ' 只做到 z=' + bb.b.h + '，而盖子的内侧在 z=' + H +
-               ' —— 螺丝够不着，这个柱子在真机上只是挡路' });
-      }
-      parts.forEach(function (p) {
-        var box = p.box;
-        var ox = Math.min(bb.x1, box.x1) - Math.max(bb.x0, box.x0);
-        var oy = Math.min(bb.y1, box.y1) - Math.max(bb.y0, box.y0);
-        var oz = Math.min(bb.b.h, box.z1) - Math.max(0, box.z0);
-        if (ox > 0.05 && oy > 0.05 && oz > 0.05) {
-          problems.push({ k: 'boss',
-            msg: bb.b.id + ' 站在 ' + p.id + ' 的位置里（重叠 ' +
-                 [ox, oy, oz].map(function (n) { return n.toFixed(1); }).join('×') +
-                 ' mm）—— 器件放不进去；把螺柱挪到空处' });
-        }
-      });
+    // -- printability
+    var minWall = (enc.printer && enc.printer.minWall) || 0.8;
+    if (enc.base.wall < minWall) problems.push({ k: 'wall', msg: '壁厚 ' + enc.base.wall + ' mm 低于打印机最小值 ' + minWall + ' mm' });
+    f.holes.forEach(function (h) {
+      if (h.r * 2 < 2.4) warns.push({ k: 'small', msg: '孔径 ' + (h.r * 2).toFixed(1) + ' mm 偏小，可能打不出来' });
     });
 
-    for (var i = 0; i < boxes.length; i++) {
-      for (var j = i + 1; j < boxes.length; j++) {
-        var A = boxes[i], B = boxes[j];
-        if (A.x0 < B.x1 - 0.05 && B.x0 < A.x1 - 0.05 && A.y0 < B.y1 - 0.05 && B.y0 < A.y1 - 0.05) {
-          problems.push({ k: 'boss', msg: A.b.id + ' 与 ' + B.b.id + ' 两个螺柱叠在一起了' });
-        }
-      }
-    }
-    if (list.length === 1) warns.push('只有 1 个螺柱：盖子会以它为轴转，至少 2 个（对角）才压得住');
-    if (list.length && !enc.lid.on) warns.push('有螺柱但 lid.on 为 false，没有盖子可拧');
-  }
-
-  function wallSpan(face, enc) {
-    var W = enc.base.w, D = enc.base.d, H = enc.base.h;
-    if (face === 'front' || face === 'back') return [W, H];
-    if (face === 'left' || face === 'right') return [D, H];
-    return [W, D];
-  }
-
-  function checkHoles(holes, enc, gaps, problems, warns) {
-    FACE_LIST.forEach(function (face) {
-      var list = holes[face] || [];
-      var span = wallSpan(face, enc);
-      if (face === 'top' && !enc.lid.on && list.length) {
-        problems.push({ k: 'cutout-no-lid',
-          msg: '有 ' + list.length + ' 个开口在盖子上，但 lid.on 是 false —— 这些孔不会出现在任何实体上' });
-      }
-      list.forEach(function (h) {
-        var a = h.aabb;
-        var edge = Math.min(a[0], a[1], span[0] - a[2], span[1] - a[3]);
-        if (edge < 1.2) {
-          problems.push({ k: 'cutout-edge',
-            msg: face + ' 面的开口 [' + a.map(function (n) { return n.toFixed(1); }).join(', ') +
-                 '] 离墙边只剩 ' + edge.toFixed(1) + ' mm，会破边；把器件往里挪，或缩小开口' });
-        }
-        if (h.owner && /:/.test(h.owner)) {
-          var port = (gaps || []).filter(function (g) { return h.owner === g.part + ':' + g.port; })[0];
-          if (port) port.cut = true;
-        }
-      });
-      for (var i = 0; i < list.length; i++) {
-        for (var j = i + 1; j < list.length; j++) {
-          var A = list[i].aabb, B = list[j].aabb;
-          if (A[0] < B[2] - 0.2 && B[0] < A[2] - 0.2 && A[1] < B[3] - 0.2 && B[1] < A[3] - 0.2) {
-            problems.push({ k: 'cutout-clash',
-              msg: face + ' 面两个开口重叠：' + list[i].owner + ' 与 ' + list[j].owner + ' —— 挪开器件，或合并成一个开口' });
-          }
-        }
-      }
-    });
-
-    /* Coverage: the hole that was punched must actually be bigger than the
-     * port it serves, otherwise the part looks out through a slit. */
-    (gaps || []).forEach(function (g) {
-      if (g.blocked) {
-        warns.push(g.part + ':' + g.port + ' 距 ' + g.face + ' 面 ' + g.gap + ' mm，插头够不到 —— 要么挪近，要么显式写 expose:false');
-        return;
-      }
-      if (!g.cut) {
-        problems.push({ k: 'blocked',
-          msg: g.part + ':' + g.port + ' 朝向 ' + g.face + '，那一面没有覆盖它的开口' });
-      }
-    });
-  }
-
-  function pkey(p) {
-    return Math.round(p[0] * 1000) + ',' + Math.round(p[1] * 1000) + ',' + Math.round(p[2] * 1000);
-  }
-
-  /* T-junctions: a vertex sitting in the middle of the neighbour's edge.
-   *
-   * The strip triangulator cuts a face at every hole vertex y, so its
-   * boundary is subdivided at those heights while the wall next to it is one
-   * long straight edge. The two agree on the line but not on the vertices,
-   * and a slicer reads that as a non-manifold seam. Splitting the long edge
-   * at the extra vertices is the repair, and it is the same repair a mesh
-   * tool does - done here because a printed part is the deliverable.
-   *
-   * Returns how many triangles were split, so the caller can iterate.
-   */
-  function onSeg(v, a, b) {
-    var ab = sub(b, a), av = sub(v, a);
-    var l2 = dot(ab, ab);
-    if (l2 < 1e-12) return -1;
-    var t = dot(av, ab) / l2;
-    if (t < 1e-6 || t > 1 - 1e-6) return -1;
-    var d = sub(av, [ab[0] * t, ab[1] * t, ab[2] * t]);
-    if (vlen(d) > 1e-6) return -1;
-    return t;
-  }
-
-  function weldTJunctions(sh) {
-    var vmap = {}, i, e;
-    for (i = 0; i < sh.tris.length; i++) {
-      for (e = 0; e < 3; e++) vmap[pkey(sh.tris[i][e])] = sh.tris[i][e];
-    }
-    var keys = [], k;
-    for (k in vmap) if (Object.prototype.hasOwnProperty.call(vmap, k)) keys.push(k);
-
-    var count = {};
-    function ek(a, b) { return pkey(a) + '>' + pkey(b); }
-    for (i = 0; i < sh.tris.length; i++) {
-      var t = sh.tris[i];
-      for (e = 0; e < 3; e++) {
-        var kk = ek(t[e], t[(e + 1) % 3]);
-        count[kk] = (count[kk] || 0) + 1;
-      }
+    // -- the removable head has to be big enough to hold anything
+    if (f.hasHead) {
+      if (f.zDiv < enc.base.floor + 4) problems.push({ k: 'head', msg: '分模线 z=' + f.zDiv + ' 太贴近底板' });
+      if (f.topZ - f.zDiv < 12) problems.push({ k: 'head', msg: '头罩只有 ' + (f.topZ - f.zDiv).toFixed(1) + ' mm 高' });
     }
 
-    var cut = {};
-    var missing = 0;
-    for (k in count) {
-      if (!Object.prototype.hasOwnProperty.call(count, k)) continue;
-      var half = k.split('>');
-      if (count[half[1] + '>' + half[0]]) continue;
-      missing++;
-      var a = vmap[half[0]], b = vmap[half[1]];
-      if (!a || !b) continue;
-      var hits = [];
-      for (i = 0; i < keys.length; i++) {
-        var kk2 = keys[i];
-        if (kk2 === half[0] || kk2 === half[1]) continue;
-        var v = vmap[kk2];
-        var tt = onSeg(v, a, b);
-        if (tt > 0) hits.push({ t: tt, p: v });
-      }
-      if (!hits.length) continue;
-      hits.sort(function (x, y) { return x.t - y.t; });
-      var pts = [a];
-      for (i = 0; i < hits.length; i++) pts.push(hits[i].p);
-      pts.push(b);
-      cut[k] = pts;
-    }
-    if (!cut) return 0;
-
-    var out = [];
-    var split = 0;
-    for (i = 0; i < sh.tris.length; i++) {
-      var tri3 = sh.tris[i], found = -1;
-      for (e = 0; e < 3; e++) {
-        if (cut[ek(tri3[e], tri3[(e + 1) % 3])]) { found = e; break; }
-      }
-      if (found < 0) { out.push(tri3); continue; }
-      var pa = tri3[found], pb = tri3[(found + 1) % 3], po = tri3[(found + 2) % 3];
-      var seq = cut[ek(pa, pb)];
-      for (var q = 0; q + 1 < seq.length; q++) out.push([po, seq[q], seq[q + 1]]);
-      split++;
-    }
-    sh.tris = out;
-    return split || missing;
-  }
-
-  /* Closed means every directed edge has exactly one opposite twin. An open
-   * shell is the signature of a cap whose triangulation dropped a region -
-   * exactly the bug that a picture would never show you. */
-  function openEdges(sh) {
-    var m = {}, k;
-    for (var i = 0; i < sh.tris.length; i++) {
-      var t = sh.tris[i];
-      for (var e = 0; e < 3; e++) {
-        k = pkey(t[e]) + '>' + pkey(t[(e + 1) % 3]);
-        m[k] = (m[k] || 0) + 1;
-      }
-    }
-    var open = 0;
-    for (k in m) {
-      var half = k.split('>');
-      if (!m[half[1] + '>' + half[0]]) open += m[k];
-    }
-    return open;
-  }
-
-  function checkMesh(shells, stats, problems) {
-    var closed = true;
-    shells.forEach(function (s) {
-      var open = openEdges(s);
-      if (open) {
-        closed = false;
-        problems.push({ k: 'mesh',
-          msg: s.name + ' 不是闭合壳：' + open + ' 条边没有对面（三角化漏了区域，或开口把面挖穿了）' });
-      }
-      if (s.tris.length < 4) {
-        problems.push({ k: 'mesh', msg: s.name + ' 只有 ' + s.tris.length + ' 个三角面，等于空壳' });
-      }
-      if (volume(s) <= 0) {
-        problems.push({ k: 'mesh', msg: s.name + ' 体积为 ' + volume(s).toFixed(1) + ' mm³，绕向错误或墙体自相交' });
-      }
-    });
-    stats.closed = closed;
-  }
-
-  function checkPrint(enc, holes, stats, problems, warns) {
-    var minWall = enc.printer.minWall || 0.8;
-    var layer = enc.printer.layer || 0.2;
-    if (enc.base.wall < minWall) problems.push({ k: 'thin', msg: '壁厚 ' + enc.base.wall + ' mm < 最小可打印壁厚 ' + minWall + ' mm' });
-    if (enc.base.floor < minWall) problems.push({ k: 'thin', msg: '底板 ' + enc.base.floor + ' mm < 最小可打印壁厚 ' + minWall + ' mm' });
-    if (enc.lid.on && enc.lid.thick < minWall) problems.push({ k: 'thin', msg: '盖板 ' + enc.lid.thick + ' mm < 最小可打印壁厚 ' + minWall + ' mm' });
-
-    var bed = enc.printer.bed || [220, 220];
-    if (stats.bbox[0] > bed[0] || stats.bbox[1] > bed[1]) {
-      problems.push({ k: 'bed',
-        msg: '外廓 ' + stats.bbox[0].toFixed(0) + '×' + stats.bbox[1].toFixed(0) +
-             ' mm 超出热床 ' + bed[0] + '×' + bed[1] + ' mm' });
-    }
-    var layers = enc.base.wall / layer;
-    if (layers < 4) warns.push('壁厚只有 ' + layers.toFixed(0) + ' 层，强度偏弱（建议 ≥ 4 层）');
+    return { sdf: f, parts: f.parts, holes: f.holes, problems: problems, warns: warns, stats: stats };
   }
 
   /* ------------------------------------------------------------------ *
-   * 11. 3D view
+   * 8. Preview
    *
-   * Painter's algorithm over an orthographic orbit camera. No z-buffer, no
-   * canvas: the output is SVG polygons, so the same picture is testable in
-   * the fake DOM, styleable from CSS, and diff-able when the geometry moves.
+   * One ray per pixel, sphere tracing, then shading with a key light, a sky
+   * term, ambient occlusion and a soft shadow. No z-buffer is needed because
+   * the field answers "what is closest here" directly - which is exactly what
+   * the old renderer could not do, and why a part used to be painted on top
+   * of the wall in front of it.
+   *
+   * Two mistakes worth remembering, both of which wasted a debugging round:
+   *   - AO sampled at h = 0.9..11 mm and scaled by 1.05, but h is in mm, so a
+   *     flat face "occluded" itself and every surface came out blotchy. The
+   *     coefficient has to be calibrated against the unit of h.
+   *   - camera right vector was cross(worldUp, fwd) instead of cross(fwd,
+   *     worldUp), which flips the image top-to-bottom.
    * ------------------------------------------------------------------ */
-  /* Orthographic orbit camera, return [screenX, screenUp, depth].
-   *
-   * The pair has to be consistent or the painter's sort inverts:
-   *   screenUp = Z*cos(pitch) + Y*sin(pitch)   at pitch 0 up is +z, at 90 the
-   *                                            far side is up - a normal orbit
-   *   depth    = Y*cos(pitch) - Z*sin(pitch)   "into the screen": at pitch 0
-   *                                            further back is deeper, at 90
-   *                                            higher is NEARER
-   * Negating the screen axis alone (which reads like "SVG y grows down") makes
-   * the box a view from below while the depth still describes a view from
-   * above. The result still looks like a box, so the bug hides - and then a
-   * screw post at z=58 gets drawn on top of a closed lid at z=66. */
-  function project(p, yaw, pitch) {
-    var cy = Math.cos(yaw), sy = Math.sin(yaw);
-    var X = p[0] * cy - p[1] * sy;
-    var Y = p[0] * sy + p[1] * cy;
-    var Z = p[2];
-    var cp = Math.cos(pitch), sp = Math.sin(pitch);
-    return [X, Z * cp + Y * sp, Y * cp - Z * sp];
-  }
-
-  function shade(hex, k) {
-    var h = String(hex || '#cccccc').replace('#', '');
+  function hex2rgb(h) {
+    h = String(h || '#cccccc').replace('#', '');
     if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
     var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
     if (isNaN(r)) { r = g = b = 200; }
-    var f = function (v) { return Math.max(0, Math.min(255, Math.round(v * k))); };
-    return 'rgb(' + f(r) + ',' + f(g) + ',' + f(b) + ')';
+    return [r / 255, g / 255, b / 255];
   }
 
-  function num(n) { return Math.round(n * 10) / 10; }
-
-  /* A part is a box, so six quads - and the quads go into the same painter
-   * list as the shell, which is what makes the shell hide them correctly
-   * instead of drawing every part on top of a closed lid. */
-  function boxTris(b) {
-    var c = [[b.x0, b.y0, b.z0], [b.x1, b.y0, b.z0], [b.x1, b.y1, b.z0], [b.x0, b.y1, b.z0],
-             [b.x0, b.y0, b.z1], [b.x1, b.y0, b.z1], [b.x1, b.y1, b.z1], [b.x0, b.y1, b.z1]];
-    var q = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
-    var out = [];
-    q.forEach(function (f) {
-      out.push([c[f[0]], c[f[1]], c[f[2]]]);
-      out.push([c[f[0]], c[f[2]], c[f[3]]]);
-    });
-    return out;
-  }
-
-  function render(encGiven, dia, opts) {
-    var m = model(encGiven, dia);
+  function paintInto(field, enc, opts, w, h, buf) {
     var o = opts || {};
-    var yaw = (o.yaw == null ? -32 : o.yaw) * Math.PI / 180;
-    var pitch = (o.pitch == null ? 20 : o.pitch) * Math.PI / 180;
-    var W = o.width || 720, Hh = o.height || 460, PAD = 22;
-    var lift = o.explode ? (o.explodeGap || 34) : 0;
-    var ghost = !!o.ghost;
-    var open = !!o.open;
-    /* A cutaway drops the front wall and the lid so the inside is visible.
-       That is not a camera trick: it is the only way the parts can be drawn
-       at all, because a painter's algorithm cannot interleave a board with
-       the floor it stands on. Removing the wall that would have covered them
-       removes the ambiguity instead of papering over it. */
-    var cut = !!o.cut;
-    /* Parts only make sense when the inside is visible; in an exterior view
-       they would have to be drawn over the wall that hides them. Declared
-       after `cut` - reading `cut` above its assignment silently yields
-       undefined, which is a cutaway with nothing in it. */
-    var showParts = o.parts == null ? cut : !!o.parts;
-    var frontY = m.enc.base.wall + 1e-6;
+    var fov = (o.fov == null ? 30 : o.fov) * Math.PI / 180;
+    var yaw = (o.yaw == null ? -36 : o.yaw) * Math.PI / 180;
+    var pitch = (o.pitch == null ? 18 : o.pitch) * Math.PI / 180;
+    var dist = o.dist || (Math.max(field.W, field.D, field.topZ) * 4.2);
+    var target = o.target || [field.W / 2, field.D / 2, field.topZ * 0.44];
 
-    /* Backface culling. A painter's algorithm has no depth buffer, so the only
-     * thing keeping the inside of a solid from being painted over its outside
-     * is that the inside is not drawn at all. Without this, every hole shows
-     * the near half of its own bore as a moon-shaped smear of wall colour, and
-     * a screw post behind the wall shows up through it - the picture looks
-     * broken even though the mesh is exact.
-     *
-     * `depth` grows away from the camera, so the camera direction is the
-     * negative gradient of it - see project(). */
-    var vdir = [-Math.sin(yaw) * Math.cos(pitch), -Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch)];
-    var cull = o.cull !== false;
-    function facing(n) { return !cull || dot(n, vdir) > 0; }
+    var dir = [Math.sin(yaw) * Math.cos(pitch), -Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch)];
+    var ro = [target[0] + dir[0] * dist, target[1] + dir[1] * dist, target[2] + dir[2] * dist];
+    var fwd = vnorm(sub(target, ro));
+    var right = vnorm([fwd[1], -fwd[0], 0]);
+    var up = [
+      right[1] * fwd[2] - right[2] * fwd[1],
+      right[2] * fwd[0] - right[0] * fwd[2],
+      right[0] * fwd[1] - right[1] * fwd[0]
+    ];
+    var tanH = Math.tan(fov / 2);
+    var fieldMap = field.map;
+    var L = vnorm([-0.42, -0.72, 0.78]);
+    var AABB = { lo: [-field.W * 0.7, -field.D * 0.8, -40], hi: [field.W * 1.7, field.D * 1.8, field.topZ + 40] };
 
-    var items = [], partItems = [], marks = [], minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
-    m.shells.forEach(function (sh) {
-      if ((open || cut) && sh.kind === 'lid') return;
-      /* A shelf is interior. In an exterior view it can only be seen through
-         a hole, and there it is drawn as a bar across the opening: painter's
-         algorithm sorts whole triangles, so a small plate 2 mm behind the
-         wall lands on top of the large wall triangles around it. The honest
-         exterior picture is the wall and the holes in it - the shelf belongs
-         to the cutaway, where the wall is gone. */
-      if (!cut && sh.kind === 'shelf') return;
-      var dz = (sh.kind === 'lid') ? lift : 0;
-      for (var i = 0; i < sh.tris.length; i++) {
-        var t = sh.tris[i];
-        if (cut && t[0][1] <= frontY && t[1][1] <= frontY && t[2][1] <= frontY) continue;
-        var p0 = project([t[0][0], t[0][1], t[0][2] + dz], yaw, pitch);
-        var p1 = project([t[1][0], t[1][1], t[1][2] + dz], yaw, pitch);
-        var p2 = project([t[2][0], t[2][1], t[2][2] + dz], yaw, pitch);
-        var n = vnorm(cross(sub(t[1], t[0]), sub(t[2], t[0])));
-        if (!facing(n)) continue;
-        /* two-sided light: a matte shell has no visible dark side */
-        var lam = Math.abs(dot(n, vnorm([-0.45, -0.72, 0.9])));
-        var k = 0.52 + 0.48 * lam;
-        if (sh.kind === 'boss') k *= 0.86;
-        /* Shade surfaces that face the cavity darker.
-         *
-         * Without this a hole reads as a patch of wall: the far wall is the
-         * same plastic, lit by the same two-sided lamp, so "the opening shows
-         * the inside" and "the opening is filled in" are the same pixels. The
-         * inside of a real box is in its own shadow, and one dot product is
-         * enough to say so. */
-        var mid = [(t[0][0] + t[1][0] + t[2][0]) / 3,
-                   (t[0][1] + t[1][1] + t[2][1]) / 3,
-                   (t[0][2] + t[1][2] + t[2][2]) / 3];
-        if (dot(n, sub([m.enc.base.w / 2, m.enc.base.d / 2, m.enc.base.h / 2], mid)) > 0) k *= 0.72;
-        items.push({
-          d: (p0[2] + p1[2] + p2[2]) / 3,
-          pts: [p0, p1, p2],
-          fill: shade(sh.color, k),
-          alpha: ghost && sh.kind !== 'base' ? 0.25 : 1,
-          kind: sh.kind
-        });
-        for (var q = 0; q < 3; q++) {
-          var p = [p0, p1, p2][q];
-          if (p[0] < minX) minX = p[0];
-          if (p[0] > maxX) maxX = p[0];
-          if (p[1] < minY) minY = p[1];
-          if (p[1] > maxY) maxY = p[1];
-        }
+    function march(rd) {
+      var t0 = 0, t1 = 2600, a;
+      for (a = 0; a < 3; a++) {
+        if (Math.abs(rd[a]) < 1e-8) { if (ro[a] < AABB.lo[a] || ro[a] > AABB.hi[a]) return -1; continue; }
+        var ta = (AABB.lo[a] - ro[a]) / rd[a], tb = (AABB.hi[a] - ro[a]) / rd[a];
+        if (ta > tb) { var s = ta; ta = tb; tb = s; }
+        if (ta > t0) t0 = ta;
+        if (tb < t1) t1 = tb;
+        if (t0 > t1) return -1;
       }
-    });
+      var tt = t0 > 0.4 ? t0 : 0.4, d;
+      for (var i = 0; i < 128; i++) {
+        d = fieldMap([ro[0] + rd[0] * tt, ro[1] + rd[1] * tt, ro[2] + rd[2] * tt]);
+        if (d < 0.00045 * tt + 0.006) return tt;
+        tt += d;
+        if (tt > t1) break;
+      }
+      return -1;
+    }
+    function normalAt(p) {
+      var e = 0.35;
+      /* Four taps instead of six. The tetrahedral offsets give the same
+       * normal to within a fraction of a degree and cost a third less -
+       * with the field evaluated six times per pixel, that is real money. */
+      var a = fieldMap([p[0] + e, p[1] - e, p[2] - e]);
+      var b = fieldMap([p[0] - e, p[1] - e, p[2] + e]);
+      var c = fieldMap([p[0] - e, p[1] + e, p[2] - e]);
+      var d2 = fieldMap([p[0] + e, p[1] + e, p[2] + e]);
+      return vnorm([a - b - c + d2, -a - b + c + d2, -a + b - c + d2]);
+    }
+    function ao(p, n) {
+      var occ = 0, sca = 1;
+      for (var i = 0; i < 4; i++) {
+        var hh = 1.8 + 3.4 * i;
+        var d = fieldMap([p[0] + n[0] * hh, p[1] + n[1] * hh, p[2] + n[2] * hh]);
+        occ += (hh - d) * sca;
+        sca *= 0.72;
+      }
+      return clamp(1 - 0.055 * occ, 0.5, 1);
+    }
+    /* The shadow ray is the most expensive thing in the frame: thirty field
+     * evaluations per lit pixel. Two cheap cuts take most of that away - a
+     * surface turned away from the light is in shadow without a single
+     * sample, and the ray only has to travel as far as the shadow actually
+     * reaches. */
+    function shadowAt(p, n) {
+      if (n[0] * L[0] + n[1] * L[1] + n[2] * L[2] <= 0) return 0;
+      var res = 1, tt = 0.9;
+      for (var i = 0; i < 18; i++) {
+        var d = fieldMap([p[0] + L[0] * tt, p[1] + L[1] * tt, p[2] + L[2] * tt]);
+        if (d < 0.03) return 0;
+        res = Math.min(res, 11 * d / tt);
+        tt += clamp(d, 0.45, 6);
+        if (tt > 170) break;
+      }
+      return clamp(res, 0, 1);
+    }
 
-    /* Parts are kept in their own list and appended after the shell, sorted
-     * among themselves. A part never intersects another part (checkParts
-     * proves it), so this is exact for them - and it is the only order that
-     * keeps a board from being painted over by the floor it stands on. */
-    if (showParts) {
-      m.parts.forEach(function (p) {
-        var tris = boxTris(p.box);
-        for (var i = 0; i < tris.length; i++) {
-          var t = tris[i];
-          var q0 = project(t[0], yaw, pitch), q1 = project(t[1], yaw, pitch), q2 = project(t[2], yaw, pitch);
-          var nn = vnorm(cross(sub(t[1], t[0]), sub(t[2], t[0])));
-          if (!facing(nn)) continue;
-          var lam2 = Math.abs(dot(nn, vnorm([-0.45, -0.72, 0.9])));
-          partItems.push({
-            d: (q0[2] + q1[2] + q2[2]) / 3,
-            pts: [q0, q1, q2],
-            fill: shade(p.color, 0.55 + 0.45 * lam2),
-            alpha: 1, kind: 'part'
-          });
-          for (var qq = 0; qq < 3; qq++) {
-            var pp = [q0, q1, q2][qq];
-            if (pp[0] < minX) minX = pp[0];
-            if (pp[0] > maxX) maxX = pp[0];
-            if (pp[1] < minY) minY = pp[1];
-            if (pp[1] > maxY) maxY = pp[1];
+    var shellCol = hex2rgb((enc.style && enc.style.color) || '#f4c542');
+    var paint = (enc.style && enc.style.paint) || [];
+    var partCols = field.parts.map(function (p) { return hex2rgb(p.color); });
+    var gz = o.ground == null ? -0.02 : o.ground;
+    var noAO = !!o.noAO, noShadow = !!o.noShadow;
+
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var px = (2 * (x + 0.5) / w - 1) * tanH * (w / h);
+        var py = (1 - 2 * (y + 0.5) / h) * tanH;
+        var rd = vnorm([
+          fwd[0] + right[0] * px + up[0] * py,
+          fwd[1] + right[1] * px + up[1] * py,
+          fwd[2] + right[2] * px + up[2] * py
+        ]);
+        var bgt = clamp(0.5 + rd[2] * 0.5, 0, 1);
+        var col = [mix(0.955, 0.855, bgt), mix(0.962, 0.895, bgt), mix(0.975, 0.945, bgt)];
+
+        var tHit = -1, isGround = false;
+        if (rd[2] < -1e-6) {
+          var tg = (gz - ro[2]) / rd[2];
+          if (tg > 0 && tg < 2600) { tHit = tg; isGround = true; }
+        }
+        var ts = march(rd);
+        if (ts > 0 && (tHit < 0 || ts < tHit)) { tHit = ts; isGround = false; }
+
+        if (tHit > 0) {
+          var p = [ro[0] + rd[0] * tHit, ro[1] + rd[1] * tHit, ro[2] + rd[2] * tHit];
+          if (isGround) {
+            var shg = noShadow ? 1 : shadowAt([p[0], p[1], gz + 0.05], [0, 0, 1]);
+            var fade = clamp(1 - hyp(p[0] - field.W / 2, p[1] - field.D / 2) / 250, 0, 1);
+            var gg = 0.9 - 0.2 * (1 - shg);
+            col = [mix(gg, 0.9, 1 - fade), mix(gg, 0.905, 1 - fade), mix(gg * 1.004, 0.915, 1 - fade)];
+          } else {
+            var n = normalAt(p);
+            var id = field.matAt(p);
+            var base = id === 0 ? shellCol : (partCols[(id - 1) % partCols.length] || hex2rgb('#64748b'));
+            if (id === 0) {
+              for (var pi = 0; pi < paint.length; pi++) {
+                var pr = paint[pi], hit = false;
+                if (pr.box) {
+                  var bb = pr.box;
+                  hit = p[0] >= bb[0] && p[1] >= bb[1] && p[2] >= bb[2] && p[0] <= bb[3] && p[1] <= bb[4] && p[2] <= bb[5];
+                } else if (pr.cyl) {
+                  /* A disc on a wall: [x, z, r, y0, y1]. A round opening needs a
+                   * round recess - painting a box around it draws a rectangle
+                   * on the face and the hole stops looking like a hole. */
+                  var cy = pr.cyl;
+                  var ddx = p[0] - cy[0], ddz = p[2] - cy[1];
+                  hit = ddx * ddx + ddz * ddz <= cy[2] * cy[2] && p[1] >= cy[3] && p[1] <= cy[4];
+                } else if (pr.sphere) {
+                  var q2 = pr.sphere;
+                  hit = hypot3(p[0] - q2[0], p[1] - q2[1], p[2] - q2[2]) < q2[3];
+                }
+                if (hit) { base = hex2rgb(pr.color); break; }
+              }
+            }
+            var aoV = noAO ? 1 : ao(p, n);
+            var diff = Math.max(dot(n, L), 0);
+            var sh = noShadow ? 1 : shadowAt([p[0] + n[0] * 1.7, p[1] + n[1] * 1.7, p[2] + n[2] * 1.7], n);
+            var sky = 0.26 + 0.22 * clamp(n[2] * 0.5 + 0.5, 0, 1);
+            var fres = Math.pow(1 - Math.max(dot(n, [-rd[0], -rd[1], -rd[2]]), 0), 3.4);
+            var spec = Math.pow(Math.max(dot(n, vnorm(sub(L, rd))), 0), 46) * 0.5;
+            var k = (sky + 1.5 * diff * sh) * aoV * 1.12;
+            col = [base[0] * k + spec + fres * 0.18, base[1] * k + spec + fres * 0.19, base[2] * k + spec + fres * 0.22];
           }
         }
-        var ctr = project([(p.box.x0 + p.box.x1) / 2, (p.box.y0 + p.box.y1) / 2, p.box.z1], yaw, pitch);
-        marks.push({ d: ctr[2], id: p.id, at: ctr });
-      });
-    }
-
-    var sw = Math.max(maxX - minX, 1e-6), sh2 = Math.max(maxY - minY, 1e-6);
-    var k2 = Math.min((W - PAD * 2) / sw, (Hh - PAD * 2) / sh2);
-    var ox = W / 2 - ((minX + maxX) / 2) * k2;
-    var oy = Hh / 2 + ((minY + maxY) / 2) * k2;
-
-    /* Equal depth means coplanar, and a post top and the deck it meets are
-       exactly coplanar by design. Break the tie by what sits outside what:
-       base, then posts and parts, then the lid. */
-    var RANK = { base: 0, shelf: 1, boss: 1, part: 2, lid: 3 };
-    items.sort(function (a, b) {
-      if (Math.abs(b.d - a.d) > 1e-6) return b.d - a.d;
-      return (RANK[a.kind] || 0) - (RANK[b.kind] || 0);
-    });
-    partItems.sort(function (a, b) { return b.d - a.d; });
-    items = items.concat(partItems);
-
-    var out = [];
-    out.push('<svg class="enc-svg" viewBox="0 0 ' + W + ' ' + Hh + '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="enclosure preview">');
-    /* A soft footprint shadow. Without it the box floats, and "which face is
-       the floor" is the first thing a reader gets wrong about a CAD picture. */
-    if (o.shadow !== false) {
-      var fs = [[0, 0], [m.enc.base.w, 0], [m.enc.base.w, m.enc.base.d], [0, m.enc.base.d]].map(
-        function (p) { return project([p[0], p[1], 0], yaw, pitch); });
-      var sx0 = 1e9, sx1 = -1e9, sy0 = 1e9, sy1 = -1e9;
-      fs.forEach(function (p) {
-        if (p[0] < sx0) sx0 = p[0];
-        if (p[0] > sx1) sx1 = p[0];
-        if (p[1] < sy0) sy0 = p[1];
-        if (p[1] > sy1) sy1 = p[1];
-      });
-      out.push('<ellipse cx="' + num(((sx0 + sx1) / 2) * k2 + ox) + '" cy="' + num(oy - ((sy0 + sy1) / 2) * k2) +
-               '" rx="' + num((sx1 - sx0) * k2 * 0.56) + '" ry="' + num((sy1 - sy0) * k2 * 0.56) +
-               '" fill="#0f172a" fill-opacity="0.10"/>');
-    }
-    out.push('<g>');
-    for (var it = 0; it < items.length; it++) {
-      var s = items[it];
-      var d = '';
-      for (var k3 = 0; k3 < 3; k3++) {
-        d += (k3 ? ' ' : '') + num(s.pts[k3][0] * k2 + ox) + ',' + num(oy - s.pts[k3][1] * k2);
+        for (var ci = 0; ci < 3; ci++) {
+          var vv = col[ci];
+          vv = vv / (1 + vv * 0.12);
+          vv = Math.pow(clamp(vv, 0, 1), 1 / 2.2);
+          buf[(y * w + x) * 4 + ci] = Math.round(clamp(vv, 0, 1) * 255);
+        }
+        buf[(y * w + x) * 4 + 3] = 255;
       }
-      out.push('<polygon points="' + d + '" fill="' + s.fill + '" fill-opacity="' + s.alpha +
-               '" stroke="' + s.fill + '" stroke-width="0.5" stroke-linejoin="round"/>');
     }
-    out.push('</g>');
-    /* ids last, so a label is never buried under a face. Only when the inside
-       is actually visible - a name floating on a closed lid is a lie. */
-    if (o.labels && showParts) {
-      marks.sort(function (a, b) { return b.d - a.d; });
-      out.push('<g class="enc-labels" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">');
-      for (var mi = 0; mi < marks.length; mi++) {
-        var mk = marks[mi];
-        out.push('<text x="' + num(mk.at[0] * k2 + ox) + '" y="' + num(oy - mk.at[1] * k2 - 4) +
-                 '" fill="#0f172a" fill-opacity="0.75">' + mk.id + '</text>');
-      }
-      out.push('</g>');
-    }
-    out.push('</svg>');
+    return buf;
+  }
 
-    return {
-      svg: out.join(''), stats: m.stats, problems: m.problems, warns: m.warns, model: m,
-      /* the same camera the picture used, so a caller can hit-test a pixel or
-         put a marker on a part without re-deriving the fit */
-      xform: {
-        k: k2, ox: ox, oy: oy, yaw: yaw, pitch: pitch,
-        toScreen: function (p) {
-          var q = project(p, yaw, pitch);
-          return [q[0] * k2 + ox, oy - q[1] * k2, q[2]];
+  /* Draws into a real <canvas>. `res` below 1 renders fewer rays and lets the
+   * 2D context upscale - four times cheaper for almost the same picture. */
+  function paint(canvas, enc, dia, opts) {
+    var o = opts || {};
+    var m = model(enc, dia);
+    m.sdf.setShowParts(!!o.cut);
+    var w = Math.max(120, Math.round(o.width || 720));
+    var h = Math.max(90, Math.round(o.height || 460));
+    var res = clamp(o.res == null ? 1 : o.res, 0.25, 1);
+    var rw = Math.max(80, Math.round(w * res)), rh = Math.max(60, Math.round(h * res));
+    canvas.width = w; canvas.height = h;
+    var ctx = canvas.getContext && canvas.getContext('2d');
+    if (!ctx || !ctx.createImageData) return { stats: m.stats, problems: m.problems, warns: m.warns };
+    var img = ctx.createImageData(rw, rh);
+    paintInto(m.sdf, enc, o, rw, rh, img.data);
+    if (rw === w && rh === h) {
+      ctx.putImageData(img, 0, 0);
+    } else {
+      var up = ctx.createImageData(w, h);
+      // Nearest-neighbour-ish upscale in JS: the canvas API for drawImage is
+      // not available on every stub, and this keeps paint() testable.
+      var d = img.data, u = up.data;
+      for (var y = 0; y < h; y++) {
+        var sy = Math.min(rh - 1, Math.floor(y * rh / h));
+        for (var x = 0; x < w; x++) {
+          var sx = Math.min(rw - 1, Math.floor(x * rw / w));
+          var si = (sy * rw + sx) * 4, di = (y * w + x) * 4;
+          u[di] = d[si]; u[di + 1] = d[si + 1]; u[di + 2] = d[si + 2]; u[di + 3] = 255;
         }
       }
-    };
+      ctx.putImageData(up, 0, 0);
+    }
+    return { stats: m.stats, problems: m.problems, warns: m.warns };
+  }
+
+  /* Wireframe fallback: bounding boxes, holes and the parting line. Not
+   * pretty, but honest, and it needs no 2D context so a test can assert that
+   * the geometry agrees with the layout. */
+  /* The numbers the viewer prints under the picture: size, solid volume and
+   * triangle count. None of them belong to the *check* - that does not mesh -
+   * so they are derived here, once, at a coarse step. A true-to-the-micron
+   * volume is not what a page needs; a figure within a percent is. */
+  function summaryStats(m) {
+    var f = m.sdf, st = {}, k;
+    for (k in m.stats) st[k] = m.stats[k];
+    st.bbox = [f.W, f.D, f.topZ];
+    /* Volume by sampling the field, not by summing the mesh. A coarse mesh
+     * whose head shell comes out open integrates to nonsense (it read 37 cm3
+     * against a true 64), and "almost right" is worse than obviously coarse on
+     * a page that also claims the part is printable. Sixty thousand point
+     * tests are exact to a fraction of a percent and cost a blink. */
+    try {
+      /* Sample a box padded past the nominal outline: the bill overhangs the
+       * front wall and the tail the back, and a box that stops at W x D would
+       * quietly leave both out of the total. */
+      var x0 = -12, x1 = f.W + 8, y0 = -22, y1 = f.D + 16, z0 = -2, z1 = f.topZ + 2;
+      var n = 70000, hit = 0, seed = 0x2545F491;
+      function rnd() { seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0; return seed / 4294967296; }
+      for (var i = 0; i < n; i++) {
+        if (f.map([x0 + rnd() * (x1 - x0), y0 + rnd() * (y1 - y0), z0 + rnd() * (z1 - z0)]) < 0) hit++;
+      }
+      st.volume = (x1 - x0) * (y1 - y0) * (z1 - z0) * hit / n;
+    } catch (e) { st.volume = null; }
+    try {
+      var bb = [-2, -2, -2, f.W + 2, f.D + 2, f.topZ + 2], step = 3.0;
+      var b = mesh(f.baseMap, bb, step), tris = b.tris.length;
+      if (f.hasHead) tris += mesh(f.headMap, bb, step).tris.length;
+      st.tris = tris;
+    } catch (e) { st.tris = null; }
+    return st;
+  }
+
+  function render(enc, dia, opts) {
+    var o = opts || {};
+    var m = model(enc, dia);
+    var f = m.sdf;
+    var W = Math.max(240, o.width || 720), H = Math.max(160, o.height || 460);
+    var st = summaryStats(m);
+    /* A shaded picture, not a wireframe. The same SDF that the printer
+     * consumes is raymarched into a raster here and embedded as a data-URL
+     * image, so what the page shows is the surface the slicer will see -
+     * perspective, occlusion, soft shadows, real depth. There is no painter's
+     * algorithm to sort and no triangle to draw "behind" a wall it is in front
+     * of. When there is no real canvas (Node, a stub), fall through to the
+     * wireframe so the page still renders something honest. */
+    try {
+      if (typeof document !== 'undefined' && document.createElement) {
+        var cv = document.createElement('canvas');
+        paint(cv, enc, dia, { width: W, height: H, cut: !!o.cut, res: o.res == null ? 0.6 : o.res });
+        var dataUrl = cv.toDataURL && cv.toDataURL('image/png');
+        if (dataUrl && dataUrl.length > 64) {
+          return {
+            svg: '<svg class="enc-svg" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="enclosure preview">'
+              + '<image x="0" y="0" width="' + W + '" height="' + H + '" href="' + dataUrl + '" preserveAspectRatio="xMidYMid meet"/></svg>',
+            stats: st, problems: m.problems, warns: m.warns, model: m
+          };
+        }
+      }
+    } catch (e) { /* wireframe below */ }
+    var yaw = (o.yaw == null ? -36 : o.yaw) * Math.PI / 180;
+    var pitch = (o.pitch == null ? 18 : o.pitch) * Math.PI / 180;
+    var s = Math.min(W / (f.W * 1.9), H / (f.topZ * 1.8));
+    var cx = W / 2, cy = H * 0.74;
+
+    function proj(p) {
+      var x = p[0] - f.W / 2, y = p[1] - f.D / 2, z = p[2];
+      var X = x * Math.cos(yaw) - y * Math.sin(yaw);
+      var Y = x * Math.sin(yaw) + y * Math.cos(yaw);
+      var Z = z * Math.cos(pitch) - Y * Math.sin(pitch);
+      return [cx + X * s, cy - Z * s];
+    }
+
+    var out = ['<svg class="enc-svg" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="enclosure wireframe">'];
+    out.push('<rect width="' + W + '" height="' + H + '" fill="#f6f7f9"/>');
+    var bb = [[0, 0, 0], [f.W, 0, 0], [f.W, f.D, 0], [0, f.D, 0], [0, 0, f.topZ], [f.W, 0, f.topZ], [f.W, f.D, f.topZ], [0, f.D, f.topZ]];
+    [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]].forEach(function (e) {
+      var a = proj(bb[e[0]]), b = proj(bb[e[1]]);
+      out.push('<line x1="' + a[0].toFixed(1) + '" y1="' + a[1].toFixed(1) + '" x2="' + b[0].toFixed(1) + '" y2="' + b[1].toFixed(1) + '" stroke="#b8c0cc" stroke-width="1"/>');
+    });
+    if (f.hasHead) {
+      var zc = proj([0, 0, f.zDiv]), zd = proj([f.W, f.D, f.zDiv]);
+      out.push('<line x1="' + zc[0].toFixed(1) + '" y1="' + zc[1].toFixed(1) + '" x2="' + zd[0].toFixed(1) + '" y2="' + zd[1].toFixed(1) + '" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="5 4"/>');
+    }
+    m.parts.forEach(function (p) {
+      var b = p.box;
+      var pts = [[b.x0, b.y0, b.z0], [b.x1, b.y0, b.z0], [b.x1, b.y1, b.z0], [b.x0, b.y1, b.z0],
+        [b.x0, b.y0, b.z1], [b.x1, b.y0, b.z1], [b.x1, b.y1, b.z1], [b.x0, b.y1, b.z1]].map(proj);
+      for (var i = 0; i < 8; i++) for (var j = i + 1; j < 8; j++) {
+        out.push('<line x1="' + pts[i][0].toFixed(1) + '" y1="' + pts[i][1].toFixed(1) + '" x2="' + pts[j][0].toFixed(1) + '" y2="' + pts[j][1].toFixed(1) + '" stroke="' + p.color + '" stroke-opacity="0.3" stroke-width="1"/>');
+      }
+    });
+    out.push('</svg>');
+    return { svg: out.join(''), stats: st, problems: m.problems, warns: m.warns, model: m };
   }
 
   /* ------------------------------------------------------------------ *
-   * 12. Binary STL
+   * 9. Isosurface -> STL
+   *
+   * Marching tetrahedra rather than marching cubes: six cases instead of 256,
+   * every case is a triangle fan, and the surface is closed by construction as
+   * long as vertices are welded on a shared grid - which `vert` does by
+   * quantising the key. Hand-writing 256 cases is how a mesh ends up with one
+   * cell nobody tested, and the slicer is the one that finds it.
    * ------------------------------------------------------------------ */
-  /* A shell's bounding box, [x0,y0,z0,x1,y1,z1]. */
-  function bbox(sh) {
-    var b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
-    for (var i = 0; i < sh.tris.length; i++) {
-      for (var v = 0; v < 3; v++) {
-        var p = sh.tris[i][v];
-        for (var a = 0; a < 3; a++) {
-          if (p[a] < b[a]) b[a] = p[a];
-          if (p[a] > b[a + 3]) b[a + 3] = p[a];
+  /* The Kuhn (Freudenthal) split of a cube into six tetrahedra: every one of
+   * them hangs off the body diagonal 0-7, and every face of the cube is cut
+   * by the same diagonal from the neighbouring cell's point of view. That
+   * last part is the whole reason this list is what it is.
+   *
+   * Get it wrong and the six tetrahedra stop tiling the cube - they overlap
+   * in one place and leave a gap in another - and the mesh comes out with a
+   * hole in every cell. A shell with 300000 open edges looks solid in a
+   * preview and falls apart in a slicer.
+   *
+   * The corner numbering is x + 2y + 4z, so 0 = (0,0,0) and 7 = (1,1,1)
+   * are the opposite corners the diagonal has to join. */
+  var TETRA = [[0, 1, 3, 7], [0, 1, 5, 7], [0, 2, 3, 7], [0, 2, 6, 7], [0, 4, 5, 7], [0, 4, 6, 7]];
+
+  /* Find the smallest box that fully contains the solid. A mesh is only
+   * watertight if the bounding box holds the whole shape: if a leg pokes out
+   * the bottom or a tail out the back, the cut edge is an open boundary the
+   * slicer cannot close. The caller passes a *hint* (often the enclosure
+   * outline, which does not know about overhanging feet), so we scan coarsely
+   * and grow the box in any direction the solid reaches, until nothing touches
+   * an edge. */
+  function solidAABB(fieldFn, hint, step) {
+    var bb = hint.slice();
+    var cs = Math.max(step * 1.5, 2.0);
+    var margin = Math.max(20, step * 4);   // enough to catch an overhang
+    for (var iter = 0; iter < 8; iter++) {
+      var nx = Math.ceil((bb[3] - bb[0]) / cs) + 1;
+      var ny = Math.ceil((bb[4] - bb[1]) / cs) + 1;
+      var nz = Math.ceil((bb[5] - bb[2]) / cs) + 1;
+      var found = false, touched = false;
+      var mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+      var i, j, k;
+      for (k = 0; k < nz; k++) {
+        var pz = bb[2] + k * cs;
+        for (j = 0; j < ny; j++) {
+          var py = bb[1] + j * cs;
+          for (i = 0; i < nx; i++) {
+            var px = bb[0] + i * cs;
+            if (fieldFn([px, py, pz]) < 0) {
+              found = true;
+              if (px < mn[0]) mn[0] = px; if (py < mn[1]) mn[1] = py; if (pz < mn[2]) mn[2] = pz;
+              if (px > mx[0]) mx[0] = px; if (py > mx[1]) mx[1] = py; if (pz > mx[2]) mx[2] = pz;
+              if (i === 0 || j === 0 || k === 0 || i === nx - 1 || j === ny - 1 || k === nz - 1) touched = true;
+            }
+          }
+        }
+      }
+      if (!found) return null;
+      if (!touched) {
+        var pad = step * 1.5 + 0.5;
+        return [mn[0] - pad, mn[1] - pad, mn[2] - pad, mx[0] + pad, mx[1] + pad, mx[2] + pad];
+      }
+      // solid reached the scan edge: grow the box and look again
+      if (mn[0] <= bb[0] + cs * 0.5) bb[0] -= margin;
+      if (mx[0] >= bb[3] - cs * 0.5) bb[3] += margin;
+      if (mn[1] <= bb[1] + cs * 0.5) bb[1] -= margin;
+      if (mx[1] >= bb[4] - cs * 0.5) bb[4] += margin;
+      if (mn[2] <= bb[2] + cs * 0.5) bb[2] -= margin;
+      if (mx[2] >= bb[5] - cs * 0.5) bb[5] += margin;
+    }
+    var pad = step * 1.5 + 0.5;
+    return [bb[0], bb[1], bb[2], bb[3], bb[4], bb[5]];
+  }
+
+  function mesh(fieldFn, bbox, step) {
+    var aabb = solidAABB(fieldFn, bbox, step);
+    if (!aabb) return { pts: [], tris: [] };
+    bbox = aabb;
+    var nx = Math.ceil((bbox[3] - bbox[0]) / step) + 1;
+    var ny = Math.ceil((bbox[4] - bbox[1]) / step) + 1;
+    var nz = Math.ceil((bbox[5] - bbox[2]) / step) + 1;
+    var grid = new Float32Array(nx * ny * nz);
+    var i, j, k;
+    /* A grid point that lands exactly on the surface is the one thing the
+     * marching cannot survive. On a flat wall the whole layer of points
+     * sits on the wall at once; on a curved surface a single point sits on
+     * it while the surface fans out of it. Either way the cells around it
+     * cannot agree where the surface goes, and every one of them leaks.
+     *
+     * So the point moves. The field is a distance, so its gradient is the
+     * outward normal: stepping a hair along it takes the point off the
+     * surface and leaves it on the outside. On a flat wall every point of
+     * the layer steps the same way, so the wall stays a wall - the layer
+     * just sits a hair outside it. On a curve the point steps clear of the
+     * cone and the fan closes up. Either way the surface stops passing
+     * exactly through a sample point, and the mesh stops leaking.
+     *
+     * The step is a nanometre: far enough to break the tie, far too small
+     * to move the surface. */
+    var EPS = 1e-7;
+    var NUDGE = 1e-3;   // 1 um: enough to separate the vertices, far too
+                        // little to move the surface anyone can see
+    var gx = new Float32Array(nx * ny * nz * 3);
+    for (k = 0; k < nz; k++) {
+      for (j = 0; j < ny; j++) {
+        for (i = 0; i < nx; i++) {
+          var px = bbox[0] + i * step, py = bbox[1] + j * step, pz = bbox[2] + k * step;
+          var gi = (k * ny + j) * nx + i;
+          var val = fieldFn([px, py, pz]);
+          if (val > -EPS && val < EPS) {
+            var e = step * 0.02;
+            var gx1 = fieldFn([px + e, py, pz]) - fieldFn([px - e, py, pz]);
+            var gy1 = fieldFn([px, py + e, pz]) - fieldFn([px, py - e, pz]);
+            var gz1 = fieldFn([px, py, pz + e]) - fieldFn([px, py, pz - e]);
+            var gl = Math.sqrt(gx1 * gx1 + gy1 * gy1 + gz1 * gz1);
+            if (gl > 1e-9) {
+              // Step out along the normal. The step has to be bigger than
+              // the weld resolution (0.1 um), or every crossing point around
+              // this one lands on the same vertex, the triangles around it
+              // collapse to nothing and the cell leaves a hole.
+              var step2 = NUDGE / gl;
+              px += gx1 * step2; py += gy1 * step2; pz += gz1 * step2;
+              val = fieldFn([px, py, pz]);
+            }
+            if (val > -EPS && val < EPS) val = EPS;
+          }
+          gx[gi * 3] = px; gx[gi * 3 + 1] = py; gx[gi * 3 + 2] = pz;
+          grid[gi] = val;
         }
       }
     }
-    return b;
+    var pts = [], tris = [], index = {};
+    var Q = 1e4;   // weld at 0.1 µm: far below any feature, above float noise
+    function vert(a, b, va, vb) {
+      var t = Math.abs(va - vb) < 1e-12 ? 0.5 : va / (va - vb);
+      var x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t, z = a[2] + (b[2] - a[2]) * t;
+      var key = Math.round(x * Q) + ',' + Math.round(y * Q) + ',' + Math.round(z * Q);
+      if (index[key] != null) return index[key];
+      index[key] = pts.length;
+      pts.push([x, y, z]);
+      return pts.length - 1;
+    }
+    /* Every triangle is wound so its normal points out of the solid. The six
+     * tetrahedra do not all have the same handedness, so the order the
+     * vertices arrive in is not enough - a shell with half its normals
+     * pointing inwards is a shell a slicer refuses. `ref` is a point on the
+     * inside, so the normal has to point away from it. */
+    function normalOf(a, b, c) {
+      var A = pts[a], B = pts[b], C = pts[c];
+      var ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2];
+      var vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+      return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+    }
+    function away(n, cx, cy, cz, ref) {
+      return n[0] * (cx - ref[0]) + n[1] * (cy - ref[1]) + n[2] * (cz - ref[2]);
+    }
+    /* A triangle with no area at all is not a triangle. It appears where
+     * two of the crossing points land on the very same vertex, and it
+     * carries an edge from a vertex to itself - the only kind of edge a
+     * watertight mesh may not have. A triangle that is merely *thin* is
+     * kept: it covers real surface, and dropping it would open a hole. */
+    function pushTri(a, b, c) {
+      var A = pts[a], B = pts[b], C = pts[c];
+      var ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2];
+      var vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+      var cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+      if (cx === 0 && cy === 0 && cz === 0) return;
+      tris.push([a, b, c]);
+    }
+    for (k = 0; k < nz - 1; k++) {
+      for (j = 0; j < ny - 1; j++) {
+        for (i = 0; i < nx - 1; i++) {
+          var v = [], c = [], m2;
+          for (m2 = 0; m2 < 8; m2++) {
+            var dx = m2 & 1, dy = (m2 >> 1) & 1, dz = (m2 >> 2) & 1;
+            var gi2 = ((k + dz) * ny + (j + dy)) * nx + (i + dx);
+            v[m2] = grid[gi2];
+            // the corner is where the field was sampled, jitter and all
+            c[m2] = [gx[gi2 * 3], gx[gi2 * 3 + 1], gx[gi2 * 3 + 2]];
+          }
+          var neg = 0, pos = 0;
+          for (m2 = 0; m2 < 8; m2++) { if (v[m2] < 0) neg++; else pos++; }
+          if (!neg || !pos) continue;
+          for (var ti = 0; ti < 6; ti++) {
+            var T = TETRA[ti], inside = [], outside = [];
+            for (var q2 = 0; q2 < 4; q2++) (v[T[q2]] < 0 ? inside : outside).push(T[q2]);
+            if (!inside.length || !outside.length) continue;
+            if (inside.length === 1 || outside.length === 1) {
+              var one = inside.length === 1 ? inside[0] : outside[0];
+              var rest = inside.length === 1 ? outside : inside;
+              var t0 = vert(c[one], c[rest[0]], v[one], v[rest[0]]);
+              var t1 = vert(c[one], c[rest[1]], v[one], v[rest[1]]);
+              var t2 = vert(c[one], c[rest[2]], v[one], v[rest[2]]);
+              // reference point inside the solid: the lone inside corner, or
+              // the middle of the three inside corners
+              var ref;
+              if (inside.length === 1) ref = c[one];
+              else ref = [(c[rest[0]][0] + c[rest[1]][0] + c[rest[2]][0]) / 3,
+                (c[rest[0]][1] + c[rest[1]][1] + c[rest[2]][1]) / 3,
+                (c[rest[0]][2] + c[rest[1]][2] + c[rest[2]][2]) / 3];
+              var A = pts[t0], B = pts[t1], Cc = pts[t2];
+              var cx = (A[0] + B[0] + Cc[0]) / 3, cy = (A[1] + B[1] + Cc[1]) / 3, cz = (A[2] + B[2] + Cc[2]) / 3;
+              if (away(normalOf(t0, t1, t2), cx, cy, cz, ref) < 0) pushTri(t0, t2, t1);
+              else pushTri(t0, t1, t2);
+            } else {
+              var p0 = inside[0], p1 = inside[1], n0 = outside[0], n1 = outside[1];
+              var b0 = vert(c[p0], c[n0], v[p0], v[n0]);
+              var b1 = vert(c[p0], c[n1], v[p0], v[n1]);
+              var b2 = vert(c[p1], c[n1], v[p1], v[n1]);
+              var b3 = vert(c[p1], c[n0], v[p1], v[n0]);
+              // The quad is triangulated as a fan, so both halves have to be
+              // wound the same way round or the shared diagonal ends up
+              // pointing the same way in both and the mesh leaks.
+              var mid = [(c[p0][0] + c[p1][0]) / 2, (c[p0][1] + c[p1][1]) / 2, (c[p0][2] + c[p1][2]) / 2];
+              var q = [(pts[b0][0] + pts[b1][0] + pts[b2][0] + pts[b3][0]) / 4,
+                (pts[b0][1] + pts[b1][1] + pts[b2][1] + pts[b3][1]) / 4,
+                (pts[b0][2] + pts[b1][2] + pts[b2][2] + pts[b3][2]) / 4];
+              if (away(normalOf(b0, b1, b3), q[0], q[1], q[2], mid) < 0) { pushTri(b0, b3, b2); pushTri(b0, b2, b1); }
+              else { pushTri(b0, b1, b2); pushTri(b0, b2, b3); }
+            }
+          }
+        }
+      }
+    }
+    return { pts: pts, tris: tris };
   }
 
-  /* Binary STL.
-   *
-   * `lay` is not cosmetic. The base and the lid are modelled assembled - the
-   * lid sitting on top of the base - so writing every shell as-is produces one
-   * file in which the two bodies occupy the same space: a slicer shows a
-   * single overlapping blob and there is nothing to print. Laying them out is
-   * the difference between a file and a print:
-   *
-   *   base + bosses  stay assembled, moved to the bed corner
-   *   lid            turned over (180 deg about x) so the flat ceiling is on
-   *                  the bed and the lip points up - printed the other way up
-   *                  the 96x80 top would be one long bridge over air, and the
-   *                  lip would hang from nothing
-   *
-   * Turning over is a rotation, not a mirror, so triangle winding survives.
-   */
-  function stl(m, opts) {
+  function volumeOf(m) {
+    var v = 0, P = m.pts, T = m.tris;
+    for (var i = 0; i < T.length; i++) {
+      var a = P[T[i][0]], b = P[T[i][1]], c = P[T[i][2]];
+      v += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+    }
+    return Math.abs(v);
+  }
+
+  /* Watertight means: every directed edge has exactly one opposite twin. Not
+   * "looks solid from here" - one missing triangle is one hole the slicer will
+   * fill with a guess. */
+  function openEdges(m) {
+    var seen = {}, open = 0, k;
+    for (var i = 0; i < m.tris.length; i++) {
+      var t = m.tris[i];
+      for (var e = 0; e < 3; e++) {
+        var a = t[e], b = t[(e + 1) % 3];
+        var ka = a + '>' + b, kb = b + '>' + a;
+        if (seen[kb]) seen[kb]--;
+        else seen[ka] = (seen[ka] || 0) + 1;
+      }
+    }
+    for (k in seen) if (seen[k] > 0) open += seen[k];
+    return open;
+  }
+
+  /* Print layout: base at the origin, head turned over and parked beside it,
+   * so one job prints both and neither needs supports under a dome. */
+  function stl(enc, dia, opts) {
     var o = opts || {};
-    var lay = o.lay !== false;
-    var only = o.which || 'all';
-    var gap = o.gap == null ? 8 : o.gap;
+    var m = model(enc, dia);
+    var f = m.sdf;
+    var step = o.step || 1.0;
+    var bb = [-2, -2, -2, f.W + 2, f.D + 2, f.topZ + 2];
 
-    var base = { tris: [] }, lid = { tris: [] };
-    m.shells.forEach(function (s) {
-      var into = s.kind === 'lid' ? lid : base;
-      for (var i = 0; i < s.tris.length; i++) into.tris.push(s.tris[i]);
+    var shells = [{ name: 'base', mesh: mesh(f.baseMap, bb, step), flip: false }];
+    if (f.hasHead) {
+      shells.push({ name: 'head', mesh: mesh(f.headMap, bb, step), flip: true });
+    }
+
+    var gap = o.gap == null ? 10 : o.gap;
+    var offsetX = 0, total = 0;
+    shells.forEach(function (s) {
+      var minX = 1e9, maxX = -1e9, minY = 1e9;
+      s.mesh.pts.forEach(function (p) {
+        if (p[0] < minX) minX = p[0];
+        if (p[0] > maxX) maxX = p[0];
+        if (p[1] < minY) minY = p[1];
+      });
+      s.dx = -minX + offsetX;
+      s.dy = -minY;
+      offsetX += (maxX - minX) + gap;
+      total += s.mesh.tris.length;
     });
-    if (only === 'base') lid.tris = [];
-    if (only === 'lid') base.tris = [];
 
-    var bbB = base.tris.length ? bbox(base) : null;
-    var bbL = lid.tris.length ? bbox(lid) : null;
-    var db = bbB ? [-bbB[0], -bbB[1], -bbB[2]] : null;
-    var dl = bbL ? [0, 0, 0] : null;
-    if (bbL && lay) {
-      var width = bbB ? (bbB[3] - bbB[0]) + gap : 0;
-      dl = [width - bbL[0], bbL[4], bbL[5]];
-    } else if (bbL) {
-      dl = [0, 0, 0];
-    }
-
-    var tris = [];
-    function put(t, d, flip) {
-      var out = [];
-      for (var i = 0; i < 3; i++) {
-        var p = t[i];
-        out.push(flip ? [p[0] + d[0], -p[1] + d[1], -p[2] + d[2]]
-                      : [p[0] + d[0], p[1] + d[1], p[2] + d[2]]);
-      }
-      tris.push(out);
-    }
-    if (bbB) for (var i = 0; i < base.tris.length; i++) put(base.tris[i], db, false);
-    if (bbL) for (var j = 0; j < lid.tris.length; j++) put(lid.tris[j], dl, lay);
-
-    var buf = new ArrayBuffer(84 + tris.length * 50);
+    var buf = new ArrayBuffer(84 + total * 50);
     var dv = new DataView(buf);
-    var hdr = 'wokwi-skill enclosure v' + VERSION;
-    for (var i = 0; i < hdr.length && i < 80; i++) dv.setUint8(i, hdr.charCodeAt(i) & 0xff);
-    dv.setUint32(80, tris.length, true);
+    for (var i = 0; i < 80; i++) dv.setUint8(i, 0);
+    dv.setUint32(80, total, true);
     var off = 84;
-    for (var t = 0; t < tris.length; t++) {
-      var tr = tris[t];
-      var n = vnorm(cross(sub(tr[1], tr[0]), sub(tr[2], tr[0])));
-      dv.setFloat32(off, n[0], true); dv.setFloat32(off + 4, n[1], true); dv.setFloat32(off + 8, n[2], true);
-      off += 12;
-      for (var v = 0; v < 3; v++) {
-        dv.setFloat32(off, tr[v][0], true);
-        dv.setFloat32(off + 4, tr[v][1], true);
-        dv.setFloat32(off + 8, tr[v][2], true);
+    shells.forEach(function (s) {
+      var P = s.mesh.pts, T = s.mesh.tris;
+      for (var ti = 0; ti < T.length; ti++) {
+        var tri = [P[T[ti][0]], P[T[ti][1]], P[T[ti][2]]];
+        if (s.flip) {
+          // Turn the head over so its opening faces the bed, and swap two
+          // vertices to keep the winding - a flipped normal confuses slicers
+          // far more than a flipped shape does.
+          var tz = f.topZ, tmp;
+          tri = tri.map(function (p) { return [p[0], p[1], tz - p[2]]; });
+          tmp = tri[1]; tri[1] = tri[2]; tri[2] = tmp;
+        }
+        var a = [tri[0][0] + s.dx, tri[0][1] + s.dy, tri[0][2]];
+        var b = [tri[1][0] + s.dx, tri[1][1] + s.dy, tri[1][2]];
+        var c = [tri[2][0] + s.dx, tri[2][1] + s.dy, tri[2][2]];
+        var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+        var vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+        var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        var nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+        dv.setFloat32(off, nx / nl, true);
+        dv.setFloat32(off + 4, ny / nl, true);
+        dv.setFloat32(off + 8, nz / nl, true);
         off += 12;
+        var vv = [a, b, c];
+        for (var q = 0; q < 3; q++) {
+          dv.setFloat32(off, vv[q][0], true);
+          dv.setFloat32(off + 4, vv[q][1], true);
+          dv.setFloat32(off + 8, vv[q][2], true);
+          off += 12;
+        }
+        dv.setUint16(off, 0, true);
+        off += 2;
       }
-      dv.setUint16(off, 0, true);
-      off += 2;
-    }
-    return new Uint8Array(buf);
+    });
+    return { data: new Uint8Array(buf), stats: { tris: total, shells: shells.length, step: step } };
   }
 
   return {
@@ -1845,8 +1636,15 @@ var Enclosure = (function () {
     model: model,
     build: model,
     check: function (enc, dia) { var m = model(enc, dia); return { problems: m.problems, warns: m.warns, stats: m.stats }; },
+    paint: paint,
     render: render,
     stl: stl,
-    resolveParts: resolveParts
+    resolveParts: resolveParts,
+    hex2rgb: hex2rgb,
+    mesh: mesh,
+    volumeOf: volumeOf,
+    openEdges: openEdges
   };
 })();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = Enclosure;
