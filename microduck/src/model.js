@@ -570,6 +570,10 @@ export function buildMicroduck(THREE, opts) {
 
     add(hip, new THREE.CylinderGeometry(1.5, 1.5, 1.7, 26), M.shell2, [side * 0.1, 0, 0], [0, 0, Math.PI / 2], 'hipServo' + key);
     add(hip, new THREE.TorusGeometry(1.02, 0.15, 8, 24), M.joint, [side * 0.92, 0, 0], [0, Math.PI / 2, 0], 'hipRing' + key);
+    /* 髋偏航舵机：竖着立在髋轴上方，藏在腹腔下缘。
+     * 规格写的 15 自由度是 每腿 5 个（髋偏航/髋俯仰/膝/踝俯仰/踝侧倾），
+     * 之前模型只做了髋俯仰和膝两个 —— 数一数就知道对不上，内部图里也没法数出 15 个。 */
+    add(hip, new THREE.CylinderGeometry(0.86, 0.86, 1.5, 22), M.joint, [0, 0.98, 0], null, 'hipYawServo' + key);
 
     add(hip, lathe(THREE, [
       [-P.thigh, 0.0002], [-P.thigh + 0.25, 1.1], [-1.1, 1.52], [-0.3, 1.6], [0.35, 1.35], [0.5, 0.0002],
@@ -590,6 +594,10 @@ export function buildMicroduck(THREE, opts) {
     ankle.name = 'ankle' + key;
     knee.add(ankle);
     add(ankle, new THREE.SphereGeometry(0.8, 18, 14), M.joint, [0, 0, 0], null, 'ankleBall' + key);
+    /* 踝部两只小舵机：俯仰一个（横轴、在球后），侧倾一个（竖轴、压在脚背里）。
+     * 9g 级的尺寸才塞得进 2.7 cm 宽的脚，所以半径都取 0.35~0.4。 */
+    add(ankle, new THREE.CylinderGeometry(0.4, 0.4, 0.85, 18), M.joint, [0, 0.02, -0.52], [0, 0, Math.PI / 2], 'anklePitchServo' + key);
+    add(ankle, new THREE.CylinderGeometry(0.34, 0.34, 0.6, 16), M.joint, [0, 0.34, 0.06], null, 'ankleRollServo' + key);
 
     /* 脚：外壳 + TPU 鞋底。蹼是这只鸭最容易被认出来的形。 */
     const foot = new THREE.Group();
@@ -644,6 +652,27 @@ export function buildMicroduck(THREE, opts) {
     { id: 'lidarIn', label: 'LiDAR 模组', note: '额头内，转鼓朝前', anchor: new THREE.Vector3(0, 24.05, 2.3) },
   ];
 
+  /* 15 个舵机，按关节登记。内部图、引脚表、校验脚本都从这里数，
+   * 而不是各自再抄一遍名字 —— 否则很容易出现"页面写 15、模型只有 11"。
+   * servo 是场景里那根圆柱网格的名字，pins.js 靠它定位连接器。 */
+  const servoJoints = [];
+  ['L', 'R'].forEach((k) => {
+    servoJoints.push(
+      { id: 'hipYaw' + k, servo: 'hipYawServo' + k, joint: '髋偏航', group: '腿' },
+      { id: 'hipPitch' + k, servo: 'hipServo' + k, joint: '髋俯仰', group: '腿' },
+      { id: 'knee' + k, servo: 'kneeServo' + k, joint: '膝', group: '腿' },
+      { id: 'anklePitch' + k, servo: 'anklePitchServo' + k, joint: '踝俯仰', group: '腿' },
+      { id: 'ankleRoll' + k, servo: 'ankleRollServo' + k, joint: '踝侧倾', group: '腿' },
+    );
+  });
+  servoJoints.push(
+    { id: 'neckYaw', servo: 'neckServoY', joint: '颈偏航', group: '颈' },
+    { id: 'neckPitch', servo: 'neckServoP', joint: '颈俯仰', group: '颈' },
+    { id: 'headPitch', servo: 'headServo', joint: '头俯仰', group: '头' },
+    { id: 'beakUpper', servo: 'beakServoU', joint: '上颚', group: '喙' },
+    { id: 'beakLower', servo: 'beakServoL', joint: '下颚', group: '喙' },
+  );
+
   const dof = {
     bodyPivot, torso, neckPivot, head, beakUpper, beakLower,
     wingL, wingR, tail,
@@ -653,6 +682,7 @@ export function buildMicroduck(THREE, opts) {
     eyeL, eyeR, eyes: [eyeL, eyeR],
     eye,                       // 旧名，指向左眼
     internals, wires, pulses,
+    servoJoints,
   };
 
   function setColorway(key) {
