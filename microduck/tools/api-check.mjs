@@ -3,8 +3,9 @@
 import fs from 'fs';
 import * as THREE from '../vendor/three/three.module.js';
 
-const src = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8')
-  + fs.readFileSync(new URL('../src/model.js', import.meta.url), 'utf8');
+const SRC = ['app.js', 'model.js', 'studio.js', 'internals.js', 'shell.js',
+  'pinout.js', 'print.js', 'fit.js', 'wiring.js'];
+const src = SRC.map((f) => fs.readFileSync(new URL('../src/' + f, import.meta.url), 'utf8')).join('\n');
 
 const used = [...new Set([...src.matchAll(/THREE\.([A-Za-z0-9_]+)/g)].map((m) => m[1]))].sort();
 const missing = used.filter((n) => THREE[n] === undefined);
@@ -14,7 +15,8 @@ console.log(missing.length ? '缺失: ' + missing.join(', ') : '缺失: 无');
 // WebGLRenderer 的方法是构造函数里挂到实例上的，原型上没有 —— 只能在源码里找
 const core = fs.readFileSync(new URL('../vendor/three/three.module.js', import.meta.url), 'utf8');
 // 两种写法都要认：类方法 setSize(...) 与构造器里挂的 this.setScissor = function
-const needs = ['setSize', 'setPixelRatio', 'setViewport', 'setScissor', 'setScissorTest', 'render'];
+const needs = ['setSize', 'setPixelRatio', 'setViewport', 'setScissor', 'setScissorTest',
+  'setClearColor', 'setClearAlpha', 'clear', 'clearDepth', 'render'];
 const has = (k) => new RegExp('this\\.' + k + '\\s*=\\s*function').test(core)
   || new RegExp('\\b' + k + '\\s*\\(\\s*(width|boolean|x|scene)').test(core);
 const badProto = needs.filter((k) => !has(k));

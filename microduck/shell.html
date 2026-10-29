@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Microduck · 外观与 3D 打印图</title>
+<style>
+  :root {
+    --bg: #0d0f12;
+    --panel: rgba(19, 22, 27, 0.86);
+    --line: rgba(255, 255, 255, 0.09);
+    --text: #e8eaee;
+    --dim: #8b929d;
+    --accent: #f5a53c;
+    --accent-soft: rgba(245, 165, 60, 0.13);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+      "Helvetica Neue", Arial, sans-serif;
+    color: var(--text); -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: fixed; inset: 0; }
+  #stage::before {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(120% 90% at 50% 8%, #2a3038 0%, #171a1f 42%, #0b0d10 100%);
+  }
+  #gl { position: relative; display: block; width: 100%; height: 100%; }
+
+  header {
+    position: fixed; top: 0; left: 0; right: 0; padding: 20px 26px 0;
+    display: flex; align-items: flex-start; gap: 14px; pointer-events: none; z-index: 6;
+  }
+  .brand h1 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: 0.02em; }
+  .brand h1 em { font-style: normal; color: var(--accent); }
+  .brand p { margin: 5px 0 0; font-size: 11px; color: var(--dim); letter-spacing: 0.05em; }
+  .specs { display: flex; gap: 6px; margin-left: auto; pointer-events: auto; flex-wrap: wrap; justify-content: flex-end; }
+  .spec {
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px;
+    font-size: 10.5px; color: var(--dim); background: rgba(255,255,255,0.03);
+    font-variant-numeric: tabular-nums;
+  }
+  .spec b { color: var(--text); font-weight: 600; }
+  .back {
+    pointer-events: auto; font-size: 11px; color: var(--dim); text-decoration: none;
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; white-space: nowrap;
+  }
+  .back:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
+
+  #panel {
+    position: fixed; top: 96px; left: 22px; width: 196px;
+    background: var(--panel); backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 13px; padding: 13px;
+    display: flex; flex-direction: column; gap: 12px; z-index: 6;
+  }
+  .lbl { font-size: 9.5px; letter-spacing: 0.16em; color: #6d7480; text-transform: uppercase; margin-bottom: 7px; }
+  .row { display: flex; gap: 5px; flex-wrap: wrap; }
+  button {
+    font: inherit; font-size: 11px; color: var(--text); cursor: pointer;
+    background: rgba(255,255,255,0.045); border: 1px solid var(--line);
+    border-radius: 7px; padding: 6px 8px; flex: 1 1 auto; min-width: 52px;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  button:hover { background: rgba(255,255,255,0.085); }
+  button.on { background: var(--accent-soft); border-color: rgba(245,165,60,0.55); color: #ffd9a3; }
+  .hint { font-size: 10px; color: #6d7480; line-height: 1.75; }
+
+  /* ---------- 右侧：分件表 / 容纳表 ---------- */
+  #side {
+    position: fixed; top: 96px; right: 22px; width: 342px; bottom: 22px;
+    background: var(--panel); backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 13px; z-index: 6;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+  .tabs button { border: 0; border-radius: 0; background: transparent; padding: 9px 0; font-size: 11px; color: var(--dim); }
+  .tabs button.on { color: var(--accent); background: rgba(245,165,60,0.06); }
+  .pane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  .pane-head {
+    padding: 8px 12px 6px; font-size: 10.5px; color: var(--text);
+    border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 7px;
+  }
+  .pane-head s { text-decoration: none; color: #6d7480; font-size: 9px; margin-left: auto; }
+  .scroll { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+  .scroll::-webkit-scrollbar { width: 5px; }
+  .scroll::-webkit-scrollbar-thumb { background: #2e343d; border-radius: 3px; }
+
+  .part {
+    display: grid; grid-template-columns: 22px 1fr auto auto; gap: 6px;
+    align-items: center; padding: 6px 12px; cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+  .part:hover { background: rgba(255,255,255,0.05); }
+  .part.on { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+  .part .no { font-size: 9px; color: #5f6672; font-variant-numeric: tabular-nums; }
+  .part .nm { font-size: 11px; line-height: 1.25; }
+  .part .nm i { display: block; font-style: normal; font-size: 9px; color: #6d7480; margin-top: 1px; }
+  .part .sz, .part .gr { text-align: right; font-size: 10px; color: #a8b0bb; font-variant-numeric: tabular-nums; }
+  .part .sz i, .part .gr i { font-style: normal; font-size: 8px; color: #5f6672; margin-left: 2px; }
+  .part .gr { color: #d8b48a; }
+
+  #partInfo {
+    flex: 0 0 auto; padding: 9px 12px; border-top: 1px solid var(--line);
+    font-size: 10px; color: var(--dim); line-height: 1.7; min-height: 44px;
+  }
+  #partInfo b { color: #ffd9a3; font-size: 11px; }
+  #partInfo i { display: block; font-style: normal; }
+
+  .fit {
+    display: grid; grid-template-columns: 1fr 42px 62px; gap: 6px;
+    padding: 5px 12px; font-size: 10.5px; cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+  .fit:hover { background: rgba(255,255,255,0.05); }
+  .fit .nm { color: #c9d2dd; }
+  .fit .fr { color: #6d7480; font-size: 9px; }
+  .fit .mm { text-align: right; color: #7fe0b0; font-variant-numeric: tabular-nums; }
+  .fit .mm.warn { color: #ffb45c; }
+
+  /* ---------- 打印设置 ---------- */
+  #settings {
+    position: fixed; left: 22px; bottom: 22px; width: 196px;
+    background: var(--panel); backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px;
+    font-size: 10px; color: var(--dim); line-height: 1.85; z-index: 6;
+  }
+  #settings b { color: var(--text); font-weight: 550; }
+  #settings .k { color: #6d7480; display: inline-block; width: 52px; }
+  #settings .hd { font-size: 9.5px; letter-spacing: 0.16em; color: #6d7480; margin-bottom: 5px; }
+
+  /* ---------- 标注 ---------- */
+  #marks { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
+  .mark { position: absolute; transform: translate(-50%, -50%); }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(245,165,60,0.16), 0 0 10px rgba(245,165,60,0.55);
+    margin: 0 auto;
+  }
+  .stem { width: 1px; height: 22px; background: linear-gradient(var(--accent), transparent); margin: 2px auto 0; }
+  .tag {
+    background: rgba(14,17,21,0.9); border: 1px solid rgba(245,165,60,0.3);
+    border-radius: 5px; padding: 3px 6px; white-space: nowrap;
+    font-size: 9.5px; color: #f3d7b0; font-variant-numeric: tabular-nums;
+  }
+  .tag i { display: block; font-style: normal; color: #8b929d; font-size: 8.5px; margin-top: 1px; }
+
+  /* ---------- 四视图 ---------- */
+  #vpLabels { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 3; }
+  #vpLabels .vp {
+    position: absolute; font-size: 9.5px; letter-spacing: 0.16em; color: #767d88;
+    text-transform: uppercase; padding: 10px 0 0 12px;
+  }
+  #vpLabels .frame { position: absolute; width: 50%; height: 50%; border: 1px solid rgba(255,255,255,0.05); }
+
+  /* ---------- 载入 ---------- */
+  #boot {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    background: var(--bg); z-index: 30; transition: opacity .45s;
+    font-size: 12px; color: var(--dim); letter-spacing: 0.1em;
+  }
+  #boot.hide { opacity: 0; pointer-events: none; }
+  #boot .bar { width: 140px; height: 2px; background: #22272e; margin-top: 14px; overflow: hidden; border-radius: 2px; }
+  #boot .bar i { display: block; height: 100%; width: 40%; background: var(--accent); animation: slide 1.1s infinite ease-in-out; }
+  @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+  .fail { max-width: 460px; line-height: 1.9; color: #d8b48a; font-size: 12px; }
+  .fail code { background: #1b2027; padding: 2px 6px; border-radius: 4px; color: #9ed0ff; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="gl"></canvas></div>
+
+<header>
+  <div class="brand">
+    <h1>Microduck <em>·</em> 外观与 3D 打印图</h1>
+    <p>分件 · 摆向 · 支撑 · 壁厚 · 腔体容纳</p>
+  </div>
+  <a class="back" href="./internals.html">器件与连线 →</a>
+  <div class="specs">
+    <div class="spec">高 <b id="specH">—</b> mm</div>
+    <div class="spec">宽 <b id="specW">—</b> mm</div>
+    <div class="spec">深 <b id="specD">—</b> mm</div>
+    <div class="spec">壁厚 <b id="specWall">—</b> mm</div>
+    <div class="spec"><b id="specParts">—</b> 个打印件</div>
+    <div class="spec">主体 <b id="specGrams">—</b> g</div>
+    <div class="spec">热床 <b id="specBed">—</b></div>
+  </div>
+</header>
+
+<div id="panel">
+  <div>
+    <div class="lbl">视图模式</div>
+    <div class="row">
+      <button id="btnSolid" class="on">外观</button>
+      <button id="btnCut">剖切</button>
+      <button id="btnCavity">腔体</button>
+    </div>
+  </div>
+  <div>
+    <div class="lbl">视角</div>
+    <div class="row" id="views"></div>
+  </div>
+  <div>
+    <div class="lbl">显示</div>
+    <div class="row">
+      <button id="btnMulti">四视图</button>
+      <button id="btnMarks" class="on">尺寸标注</button>
+      <button id="btnSpin">自动旋转</button>
+    </div>
+  </div>
+  <div class="hint">
+    点右侧任一分件 → 只留那一件<br />
+    上身 / 下身壳会真的按分模面切开<br />
+    腔体模式里壳变半透，器件按体积出现
+  </div>
+</div>
+
+<div id="settings">
+  <div class="hd">打印设置（建议值）</div>
+  <div><span class="k">喷嘴</span><b>0.4 mm</b> · 2 圈墙</div>
+  <div><span class="k">PETG</span><b>240/80 ℃</b> · 40 mm/s</div>
+  <div><span class="k">TPU</span><b>225/45 ℃</b> · 20 mm/s</div>
+  <div><span class="k">填充</span><b>15%</b> 螺旋 · 外壳件</div>
+  <div><span class="k">支撑</span><b>树状</b> · 仅接触热床</div>
+</div>
+
+<div id="side">
+  <div class="tabs">
+    <button id="tParts" class="on">分件表</button>
+    <button id="tFit">腔体容纳</button>
+  </div>
+
+  <div class="pane" id="paneParts">
+    <div class="pane-head">打印分件 <s>尺寸 mm · 估重 g</s></div>
+    <div class="scroll" id="partList"></div>
+    <div id="partInfo">点一行查看该件的打印说明</div>
+  </div>
+
+  <div class="pane" id="paneFit" style="display:none">
+    <div class="pane-head">器件到内壁的最小间隙 <s id="fitSum"></s></div>
+    <div class="scroll" id="fitList"></div>
+    <div id="fitWrap" style="padding: 9px 12px; border-top: 1px solid var(--line); font-size: 10px; color: #8b929d; line-height: 1.75">
+      间隙按壁厚 <b style="color:#e8eaee">2.4 mm</b> 的内壁算，四个角点取最差的一个。<br />
+      点一行会把相机送到那件器件旁边。
+    </div>
+  </div>
+</div>
+
+<div id="marks"></div>
+<div id="vpLabels"></div>
+
+<div id="boot">
+  <div style="text-align:center">
+    <div>正在量分件与腔体…</div>
+    <div class="bar"><i></i></div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.js" } }
+</script>
+<script type="module" src="./src/shell.js"></script>
+<script>
+  setTimeout(function () {
+    if (window.__MD_OK) return;
+    var boot = document.getElementById('boot');
+    boot.classList.remove('hide');
+    boot.innerHTML = '<div class="fail">' +
+      '<b>需要用本地 HTTP 打开。</b><br><br>' +
+      '浏览器的 ES 模块在 <code>file://</code> 下会被拦截。<br><br>' +
+      '在仓库根目录执行：<br><code>node microduck/serve.mjs</code><br><br>' +
+      '然后打开 <code>http://localhost:8099/shell.html</code>。' +
+      '</div>';
+  }, 2400);
+</script>
+</body>
+</html>

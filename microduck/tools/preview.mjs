@@ -5,6 +5,8 @@ import path from 'path';
 import zlib from 'zlib';
 import * as THREE from '../vendor/three/three.module.js';
 import { buildMicroduck, POSES, applyPose } from '../src/model.js';
+import { buildPinout, buildHarness } from '../src/pinout.js';
+import { bodyInnerR } from '../src/fit.js';
 
 /* ---- PNG 写入 ---- */
 function crc32(buf) {
@@ -205,6 +207,19 @@ const SHELL_MATS = [duck.materials.shell, duck.materials.shell2, duck.materials.
 // inner = 外壳全隐，只看器件；cut = 沿 x=0 剖开，近侧半壳切掉，器件完整
 const internalView = poseKey === 'internal';
 const cutView = poseKey === 'cut';
+const pinsView = poseKey === 'pins';
+if (pinsView) {
+  duck.dof.internals.visible = true;
+  duck.dof.bodyPivot.rotation.set(0, 0, 0);
+  const po = buildPinout(THREE, duck);
+  const h = buildHarness(THREE, duck, po, { innerR: bodyInnerR });
+  duck.root.updateMatrixWorld(true);
+  console.log('引脚 %d 个 / 插座 %d 个 / 线 %d 段', po.stats.pins, po.stats.connectors, h.wireCount);
+  duck.dof.pulses.forEach((p, i) => {
+    p.mesh.visible = true;
+    p.curve.getPoint((i * 0.31) % 1, p.mesh.position);
+  });
+}
 if (internalView || cutView) {
   duck.dof.internals.visible = true;
   duck.dof.wires.visible = true;
@@ -221,14 +236,22 @@ duck.root.traverse((o) => { if (o.isMesh) { meshes++; tris += (o.geometry.index 
 console.log('网格 %d 个，三角面 %d', meshes, Math.round(tris));
 
 let all = collect(duck.root, SHELL_MATS);
-if (internalView) all = all.filter((t) => !t.isShell);
+if (internalView || pinsView) all = all.filter((t) => !t.isShell);
 if (cutView) {
   // 质心在 +x 的外壳三角面丢掉 —— 与浏览器里那张随相机转的裁剪面同一个意思
   all = all.filter((t) => !t.isShell || (t.P[0].x + t.P[1].x + t.P[2].x) / 3 <= 0);
 }
-const detailView = internalView || cutView;
+const detailView = internalView || cutView || pinsView;
 const target = new THREE.Vector3(0, detailView ? 12.0 : 12.4, detailView ? 0.2 : 0.4);
-const views = detailView ? [
+const views = pinsView ? [
+  { yaw: 32, pitch: 14, fov: 26, name: 'pins-hero' },
+  { yaw: 0, pitch: 2, fov: 22, name: 'pins-front' },
+  { yaw: 62, pitch: 8, fov: 22, name: 'pins-side' },
+  // 近摄：主控板 J1..J9 那一圈插座，看得到针和落点
+  { yaw: -78, pitch: 12, fov: 26, name: 'pins-mb', dist: 7.5, target: [-3.9, 10.6, -0.4] },
+  { yaw: 2, pitch: 20, fov: 26, name: 'pins-bus', dist: 8.5, target: [0, 6.4, 1.4] },
+  { yaw: 40, pitch: 60, fov: 26, name: 'pins-top' },
+] : detailView ? [
   { yaw: 30, pitch: 16, fov: 30, name: 'inner-hero' },
   { yaw: 0, pitch: 2, fov: 30, name: 'inner-front' },
   { yaw: 90, pitch: 2, fov: 30, name: 'inner-side' },
@@ -277,15 +300,16 @@ for (let vi = 0; vi < views.length; vi++) {
   const v = isPoseSheet
     ? { yaw: 26, pitch: 11, fov: 30, name: poseList[vi] }
     : views[vi];
-  const dist = 74;
+  const dist = v.dist || 74;
+  const tg = v.target ? new THREE.Vector3(...v.target) : target;
   const yr = v.yaw * Math.PI / 180, pr = v.pitch * Math.PI / 180;
   cam.fov = v.fov;
   cam.position.set(
-    target.x + Math.sin(yr) * Math.cos(pr) * dist,
-    target.y + Math.sin(pr) * dist,
-    target.z + Math.cos(yr) * Math.cos(pr) * dist
+    tg.x + Math.sin(yr) * Math.cos(pr) * dist,
+    tg.y + Math.sin(pr) * dist,
+    tg.z + Math.cos(yr) * Math.cos(pr) * dist
   );
-  cam.lookAt(target);
+  cam.lookAt(tg);
   cam.updateProjectionMatrix();
   cam.updateMatrixWorld(true);
   const tris = isPoseSheet ? collect(duck.root) : all;
