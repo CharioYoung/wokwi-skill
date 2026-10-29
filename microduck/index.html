@@ -147,55 +147,64 @@
       <div class="art">
         <div class="grid"></div>
         <svg viewBox="0 0 420 196" fill="none">
-          <!-- 主控板 -->
-          <rect x="150" y="44" width="120" height="74" rx="4" stroke="#4fd8ff" stroke-width="1.2" fill="rgba(79,216,255,0.05)"/>
-          <rect x="164" y="56" width="34" height="30" rx="2" stroke="#4fd8ff" stroke-width="0.8" opacity="0.7"/>
-          <text x="210" y="40" fill="#b6ecff" font-size="9" font-family="ui-monospace,monospace">RK3566</text>
-          <!-- 引脚 -->
-          <g stroke="#4fd8ff" stroke-width="1" opacity="0.85">
-            <path d="M150 58h-7M150 64h-7M150 70h-7M150 76h-7M150 82h-7M150 88h-7M150 94h-7M150 100h-7"/>
-            <path d="M270 62h7M270 70h7M270 78h7M270 86h7M270 94h7"/>
-            <path d="M180 44v-7M190 44v-7M200 44v-7M210 44v-7M220 44v-7M230 44v-7M240 44v-7"/>
+          <!-- 两块板平铺在台面上：阻焊 + 丝印框 + 安装孔 -->
+          <g>
+            <rect x="34" y="62" width="150" height="96" rx="4" fill="#0d3f2e" stroke="#08241a"/>
+            <rect x="38" y="66" width="142" height="88" rx="3" stroke="#cfe3d8" stroke-opacity="0.25" stroke-width="0.7"/>
+            <rect x="248" y="44" width="140" height="118" rx="4" fill="#0e3b2d" stroke="#08241a"/>
+            <rect x="252" y="48" width="132" height="110" rx="3" stroke="#cfe3d8" stroke-opacity="0.25" stroke-width="0.7"/>
           </g>
-          <!-- 线束：绕开板子走内壁 -->
-          <g stroke-width="1.1" fill="none" opacity="0.9">
-            <path d="M143 58C112 56 96 44 78 44" stroke="#ff6b3d"/>
-            <path d="M277 70c26-2 40-20 58-22" stroke="#4fd8ff"/>
-            <path d="M277 86c24 12 34 34 50 44" stroke="#6ef2a6"/>
-            <path d="M200 37c0-14 6-22 14-30" stroke="#c48bff"/>
-            <path d="M210 118c0 18-8 28-18 38" stroke="#ffd24a"/>
+          <!-- 板上的零件 -->
+          <g fill="#22272d" stroke="#0a0c0f" stroke-width="0.8">
+            <rect x="46" y="76" width="34" height="24" rx="2"/>
+            <rect x="88" y="78" width="22" height="14" rx="1.5"/>
+            <rect x="262" y="60" width="46" height="34" rx="2"/>
           </g>
-          <!-- 器件 -->
-          <g stroke="#8b929d" stroke-width="1" fill="rgba(255,255,255,0.03)">
-            <rect x="44" y="34" width="34" height="20" rx="3"/>
-            <rect x="336" y="36" width="38" height="22" rx="3"/>
-            <rect x="328" y="122" width="46" height="24" rx="3"/>
-            <rect x="176" y="152" width="40" height="20" rx="3"/>
+          <g stroke="#a8b0b8" stroke-width="1">
+            <rect x="318" y="62" width="44" height="26" rx="2" fill="#8d959d"/>
           </g>
-          <g fill="#868e9a" font-size="8.5" font-family="ui-monospace,monospace">
-            <text x="44" y="30">电池</text>
-            <text x="336" y="32">舵机板</text>
-            <text x="328" y="118">扬声器</text>
-            <text x="176" y="148">IMU</text>
+          <g fill="#8fa79a" font-family="ui-monospace,monospace" font-size="7">
+            <text x="46" y="72">RP2040</text>
+            <text x="264" y="57">RK3566</text>
           </g>
-          <!-- 引脚号 -->
-          <g fill="#b6ecff" font-size="7" font-family="ui-monospace,monospace">
-            <text x="132" y="60">1</text><text x="132" y="66">2</text>
-            <text x="132" y="72">3</text><text x="132" y="78">4</text>
+          <!-- 插座：奶白壳 + 金针 -->
+          <g>
+            <g fill="#e9e3d5" stroke="#6f6857" stroke-width="0.7">
+              <rect x="184" y="76" width="7" height="20" rx="1.5"/>
+              <rect x="184" y="104" width="7" height="20" rx="1.5"/>
+              <rect x="184" y="132" width="7" height="18" rx="1.5"/>
+              <rect x="240" y="70" width="7" height="22" rx="1.5"/>
+              <rect x="240" y="102" width="7" height="22" rx="1.5"/>
+            </g>
+            <g stroke="#d3ab5c" stroke-width="1.4">
+              <path d="M185 82h5M185 89h5M185 110h5M185 117h5M185 138h5M185 145h5"/>
+              <path d="M241 78h5M241 86h5M241 110h5M241 118h5"/>
+            </g>
+          </g>
+          <!-- 线：正交走线，按总线配色 -->
+          <g stroke-width="1.3" fill="none" opacity="0.95">
+            <path d="M191 84h14v-6h35" stroke="#4fd8ff"/>
+            <path d="M191 91h10v14h39" stroke="#4fd8ff"/>
+            <path d="M191 112h18v-8h32" stroke="#4fd8ff"/>
+            <path d="M191 119h14v16h36" stroke="#4fd8ff"/>
+            <path d="M191 145h22v14h27" stroke="#4fd8ff"/>
+            <path d="M247 79h-16v-8h-12" stroke="#ff6b3d"/>
+            <path d="M247 112h-14v10h-14" stroke="#6ef2a6"/>
+            <path d="M318 92v28h-71" stroke="#c48bff"/>
           </g>
           <g fill="#5f6773" font-size="8" font-family="ui-monospace,monospace">
-            <text x="150" y="188">55 插座 / 216 引脚 / 60 条网</text>
+            <text x="34" y="180">55 插座 / 216 引脚 / 60 条网</text>
           </g>
         </svg>
       </div>
       <div class="body">
         <div class="kicker">Sheet 2 / 2</div>
-        <h2>器件装配与连线图</h2>
-        <p>给装配和接线看的那一张。外壳退成 6% 的影，器件、插座、每根针都在。</p>
+        <h2>器件接线图</h2>
+        <p>给装配和接线看的那一张。器件按实物平铺画，不套外壳也不共用外观图的镜头。</p>
         <ul>
-          <li>55 个插座、216 个引脚，线束端点落在具体的脚上，不是器件中心</li>
-          <li>点一个插座 → 右下角近摄视口，pin 号与网名标在针上</li>
-          <li>逐脚网表 + BOM，点一行两端一起亮</li>
+          <li>绿色阻焊、金针、丝印、安装孔：55 个插座按真实脚数排在板边</li>
+          <li>线是 8 px 栅格上跑出来的正交走线，端点就是针，24 芯 FPC 收成一条扁带</li>
+          <li>点插座 → 逐脚表（脚号 / 网名 / 接到哪）；底部 60 条网表 + BOM 按总线过滤</li>
         </ul>
         <div class="go">打开器件图 <span>→</span></div>
       </div>
@@ -204,8 +213,8 @@
 </div>
 
 <footer>
-  两张图共用一份几何（<code>src/model.js</code>）和一份壁厚数据（<code>src/fit.js</code>），
-  所以改一个比例，外观的间隙表和器件的穿模检查会一起变。
+  两张图共用一份电气事实（<code>src/hardware.js</code>：插座型号、脚数、网名）和一份壁厚数据
+  （<code>src/fit.js</code>），所以改一个插座脚数，两张图和校验脚本会一起变。
   · 旧的三合一评审台保留在 <a href="./review.html">review.html</a>（姿态 / 步态 / 配色演示）
 </footer>
 </body>

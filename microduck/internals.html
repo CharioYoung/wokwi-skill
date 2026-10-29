@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Microduck · 器件装配与连线图</title>
+<title>Microduck · 器件接线图</title>
 <style>
   :root {
     --bg: #0a0d11;
-    --panel: rgba(17, 21, 27, 0.88);
+    --panel: rgba(17, 21, 27, 0.9);
     --line: rgba(255, 255, 255, 0.08);
     --text: #e6eaef;
     --dim: #838b97;
@@ -21,35 +21,39 @@
       "Helvetica Neue", Arial, sans-serif;
     color: var(--text); -webkit-font-smoothing: antialiased;
   }
+
+  /* 图纸本身铺满，界面浮在上面 —— 和外观图一样，图是主角 */
   #stage { position: fixed; inset: 0; }
-  /* 器件图不要"影棚"，要像一块工作台：深冷灰 + 技术网格 */
   #stage::before {
     content: ""; position: absolute; inset: 0;
-    background:
-      radial-gradient(120% 90% at 50% 0%, #1b2530 0%, #0e1318 46%, #080a0d 100%);
+    background: radial-gradient(120% 90% at 50% 0%, #141b23 0%, #0b0f14 55%, #080a0d 100%);
   }
-  #stage::after {
-    content: ""; position: absolute; inset: 0; opacity: 0.35;
-    background-image:
-      linear-gradient(rgba(255,255,255,0.026) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,0.026) 1px, transparent 1px);
-    background-size: 44px 44px;
-    mask-image: radial-gradient(circle at 50% 45%, #000 20%, transparent 78%);
-  }
-  #gl { position: relative; display: block; width: 100%; height: 100%; }
+  #stage svg { position: relative; display: block; width: 100%; height: 100%; cursor: grab; }
+  #stage svg:active { cursor: grabbing; }
+
+  /* 高亮 / 压暗：只调透明度，不改几何，读者不会以为图变了 */
+  svg .wire { transition: opacity .14s ease, stroke-width .14s ease; }
+  svg .wire.hl { opacity: 1; stroke-width: 2.8; }
+  svg .wire.dim { opacity: 0.07; }
+  svg.no-dim .wire.dim { opacity: 0.5; }
+  svg .dev, svg .conn, svg .pin { transition: opacity .14s ease; }
+  svg .dev.dim, svg .conn.dim { opacity: 0.32; }
+  svg .conn.hl { filter: drop-shadow(0 0 5px rgba(79,216,255,0.85)); }
+  svg .pin.hl { stroke: #ffffff; stroke-width: 1.2; }
+  svg .pinnums { pointer-events: none; }
 
   header {
-    position: fixed; top: 0; left: 0; right: 0; padding: 20px 26px 0;
-    display: flex; align-items: flex-start; gap: 16px; pointer-events: none; z-index: 6;
+    position: fixed; top: 0; left: 0; right: 0; padding: 18px 24px 0;
+    display: flex; align-items: flex-start; gap: 14px; pointer-events: none; z-index: 6;
   }
-  .brand h1 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: 0.02em; }
+  .brand h1 { margin: 0; font-size: 16.5px; font-weight: 650; letter-spacing: 0.02em; }
   .brand h1 em { font-style: normal; color: var(--cyan); }
-  .brand p { margin: 5px 0 0; font-size: 11px; color: var(--dim); letter-spacing: 0.05em; }
+  .brand p { margin: 5px 0 0; font-size: 11px; color: var(--dim); letter-spacing: 0.04em; }
   #stat {
     margin-left: auto; font-size: 10.5px; color: var(--dim);
-    background: rgba(12,16,21,0.7); border: 1px solid var(--line);
+    background: rgba(12,16,21,0.72); border: 1px solid var(--line);
     border-radius: 999px; padding: 5px 11px; font-variant-numeric: tabular-nums;
-    pointer-events: auto; max-width: 46vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    pointer-events: auto; max-width: 44vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .back {
     pointer-events: auto; font-size: 11px; color: var(--dim); text-decoration: none;
@@ -57,13 +61,12 @@
   }
   .back:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
 
-  /* ---------- 左侧控制 ---------- */
   #panel {
-    position: fixed; top: 92px; left: 22px; width: 210px;
+    position: fixed; top: 88px; left: 20px; width: 214px;
     background: var(--panel); backdrop-filter: blur(14px);
-    border: 1px solid var(--line); border-radius: 13px; padding: 13px;
-    display: flex; flex-direction: column; gap: 13px; z-index: 6;
-    max-height: calc(100vh - 130px); overflow-y: auto;
+    border: 1px solid var(--line); border-radius: 13px; padding: 12px;
+    display: flex; flex-direction: column; gap: 12px; z-index: 6;
+    max-height: calc(100vh - 220px); overflow-y: auto;
   }
   #panel::-webkit-scrollbar { width: 5px; }
   #panel::-webkit-scrollbar-thumb { background: #2a323c; border-radius: 3px; }
@@ -72,43 +75,44 @@
   button {
     font: inherit; font-size: 11px; color: var(--text); cursor: pointer;
     background: rgba(255,255,255,0.04); border: 1px solid var(--line);
-    border-radius: 7px; padding: 6px 8px; flex: 1 1 auto; min-width: 54px;
+    border-radius: 7px; padding: 6px 8px; flex: 1 1 auto; min-width: 52px;
     transition: background .15s, border-color .15s, color .15s;
   }
   button:hover { background: rgba(255,255,255,0.08); }
   button.on { background: var(--cyan-soft); border-color: rgba(79,216,255,0.5); color: #b6ecff; }
 
-  /* ---------- 右侧：器件 / 引脚 ---------- */
+  #legend { display: flex; flex-direction: column; gap: 4px; }
+  .lg {
+    display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 7px;
+    text-align: left; padding: 5px 6px; border-radius: 6px; border: 1px solid transparent;
+    background: transparent;
+  }
+  .lg:hover { background: rgba(255,255,255,0.05); }
+  .lg.on { border-color: rgba(79,216,255,0.45); background: rgba(79,216,255,0.08); }
+  .lg i { width: 10px; height: 3px; border-radius: 2px; display: block; }
+  .lg b { font-size: 10.5px; font-weight: 500; }
+  .lg s { text-decoration: none; font-size: 9px; color: #6d7580; font-variant-numeric: tabular-nums; }
+
   #side {
-    position: fixed; top: 92px; right: 22px; width: 296px; bottom: 132px;
+    position: fixed; top: 88px; right: 20px; width: 300px; bottom: 122px;
     background: var(--panel); backdrop-filter: blur(14px);
     border: 1px solid var(--line); border-radius: 13px; z-index: 6;
     display: flex; flex-direction: column; overflow: hidden;
   }
   #side .tabs { display: flex; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
   #side .tabs button {
-    border: 0; border-radius: 0; background: transparent; padding: 9px 0;
-    font-size: 11px; color: var(--dim);
+    border: 0; border-radius: 0; background: transparent; padding: 9px 0; font-size: 11px; color: var(--dim);
   }
   #side .tabs button.on { color: var(--cyan); background: rgba(79,216,255,0.06); }
   .pane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
   .pane-head {
     padding: 9px 12px 7px; font-size: 11px; color: var(--text);
-    border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 7px;
+    border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 7px; flex: 0 0 auto;
   }
   .pane-head s { text-decoration: none; color: #6d7580; font-size: 9.5px; }
   .scroll { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
   .scroll::-webkit-scrollbar { width: 5px; }
   .scroll::-webkit-scrollbar-thumb { background: #2a323c; border-radius: 3px; }
-
-  .row-item {
-    padding: 6px 12px; border-bottom: 1px solid rgba(255,255,255,0.035);
-    cursor: pointer; transition: background .12s;
-  }
-  .row-item:hover { background: rgba(255,255,255,0.05); }
-  .row-item.on { background: var(--cyan-soft); box-shadow: inset 2px 0 0 var(--cyan); }
-  .row-item b { display: block; font-size: 11.5px; font-weight: 550; }
-  .row-item i { display: block; font-style: normal; font-size: 9.5px; color: #6d7580; margin-top: 2px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
   th {
@@ -118,24 +122,39 @@
   }
   td { padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.03); font-variant-numeric: tabular-nums; }
   td.n { color: var(--cyan); width: 26px; }
-  td.dim { color: #6d7580; }
-  .empty { padding: 26px 14px; font-size: 11px; color: #5f6773; line-height: 1.8; }
+  td.dim, s { color: #6d7580; text-decoration: none; }
+  tr.on td { background: rgba(79,216,255,0.1); }
+  tbody tr[data-pin-net] { cursor: pointer; }
+  tbody tr[data-pin-net]:hover td { background: rgba(79,216,255,0.06); }
+  tbody tr[data-pin-net].on td { background: rgba(79,216,255,0.13); }
+  .empty { padding: 24px 14px; font-size: 11px; color: #5f6773; line-height: 1.8; }
 
-  /* ---------- 底部网表 ---------- */
+  #netInfo {
+    display: none; padding: 10px 12px; border-top: 1px solid var(--line); flex: 0 0 auto;
+    font-size: 10.5px; line-height: 1.7;
+  }
+  #netInfo b { color: var(--cyan); font-size: 12px; }
+  #netInfo i { display: block; font-style: normal; color: #7d8794; font-size: 9.5px; margin: 2px 0 6px; }
+  #netInfo .chip {
+    display: inline-block; margin: 2px 4px 0 0; padding: 1px 6px; cursor: pointer;
+    border: 1px solid rgba(79,216,255,0.34); border-radius: 4px; color: #b6ecff; font-size: 9.5px;
+  }
+  #netInfo .chip:hover { background: rgba(79,216,255,0.14); }
+
   #net {
-    position: fixed; left: 22px; right: 340px; bottom: 20px; height: 104px;
+    position: fixed; left: 20px; right: 336px; bottom: 18px; height: 92px;
     background: var(--panel); backdrop-filter: blur(14px);
     border: 1px solid var(--line); border-radius: 12px; z-index: 6;
     display: flex; flex-direction: column; overflow: hidden;
   }
   #net .hd {
-    display: flex; align-items: center; gap: 9px; padding: 7px 12px;
+    display: flex; align-items: center; gap: 9px; padding: 6px 12px;
     border-bottom: 1px solid var(--line); flex: 0 0 auto;
   }
   #net .hd b { font-size: 11px; font-weight: 550; }
   #net .hd span { font-size: 9.5px; color: #6d7580; }
   #netFilter {
-    margin-left: auto; width: 130px; font: inherit; font-size: 10.5px; color: var(--text);
+    margin-left: auto; width: 140px; font: inherit; font-size: 10.5px; color: var(--text);
     background: rgba(255,255,255,0.05); border: 1px solid var(--line); border-radius: 6px;
     padding: 3px 7px; outline: none;
   }
@@ -143,77 +162,23 @@
   #netTable::-webkit-scrollbar { width: 5px; }
   #netTable::-webkit-scrollbar-thumb { background: #2a323c; border-radius: 3px; }
   .nt-head, .nt-row {
-    display: grid; grid-template-columns: 1.5fr 0.6fr 0.8fr 1.6fr 0.3fr;
+    display: grid; grid-template-columns: 1.6fr 0.55fr 0.7fr 0.7fr 0.3fr;
     gap: 8px; padding: 3px 12px; align-items: center;
   }
   .nt-head { color: #626a76; font-size: 9px; letter-spacing: 0.06em; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: #12161c; }
   .nt-row { border-bottom: 1px solid rgba(255,255,255,0.026); cursor: pointer; font-variant-numeric: tabular-nums; }
   .nt-row:hover { background: rgba(79,216,255,0.08); }
-  .nt-row .nm s { text-decoration: none; color: #6d7580; }
-  .bus { font-size: 9px; padding: 1px 0; }
-  .b-power { color: #ff8b60; } .b-bus { color: #4fd8ff; } .b-cam { color: #c48bff; }
-  .b-i2c { color: #6ef2a6; } .b-aud { color: #ffd24a; } .b-gpio { color: #9aa1ac; }
+  .nt-row .nm s { color: #6d7580; }
 
-  /* ---------- 放大镜 ---------- */
-  #insetFrame {
-    position: fixed; display: none; z-index: 5; pointer-events: none;
-    border: 1px solid rgba(79,216,255,0.42); border-radius: 9px;
-    box-shadow: 0 18px 50px rgba(0,0,0,0.55);
-  }
-  #insetTitle {
-    position: absolute; top: -19px; left: 2px; font-size: 9.5px;
-    letter-spacing: 0.1em; color: #7fd9f5; text-transform: uppercase;
-  }
-  #pinLabels { position: fixed; inset: 0; pointer-events: none; z-index: 7; display: none; }
-  .plab {
-    position: absolute; transform: translate(-50%, -50%);
-    display: flex; align-items: center; gap: 3px; white-space: nowrap;
-    font-size: 8.5px; line-height: 1;
-  }
-  .plab b {
-    background: rgba(8,14,20,0.9); border: 1px solid rgba(79,216,255,0.5);
-    color: #b6ecff; border-radius: 3px; padding: 2px 3px; font-weight: 600;
-  }
-  .plab s {
-    text-decoration: none; color: #9fb0c0; font-size: 7.5px;
-    background: rgba(8,14,20,0.75); padding: 1px 2px; border-radius: 2px;
-  }
-
-  /* ---------- 悬浮提示 ---------- */
   #tip {
     position: fixed; display: none; z-index: 9; pointer-events: none;
     background: rgba(10,14,19,0.95); border: 1px solid rgba(79,216,255,0.32);
     border-radius: 7px; padding: 6px 9px; font-size: 10.5px; line-height: 1.45;
-    max-width: 240px; box-shadow: 0 10px 26px rgba(0,0,0,0.5);
+    max-width: 250px; box-shadow: 0 10px 26px rgba(0,0,0,0.5);
   }
   #tip b { color: var(--cyan); }
   #tip i { display: block; font-style: normal; color: #7d8794; font-size: 9.5px; margin-top: 2px; }
 
-  /* ---------- 标注 ---------- */
-  #marks { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
-  .mark { position: absolute; transform: translate(-50%, -50%); }
-  .dot {
-    width: 6px; height: 6px; border-radius: 50%; background: var(--cyan);
-    box-shadow: 0 0 0 3px rgba(79,216,255,0.16), 0 0 10px rgba(79,216,255,0.6);
-    margin: 0 auto;
-  }
-  .stem { width: 1px; height: 22px; background: linear-gradient(var(--cyan), transparent); margin: 2px auto 0; }
-  .tag {
-    background: rgba(8,12,17,0.9); border: 1px solid rgba(79,216,255,0.28);
-    border-radius: 5px; padding: 3px 6px; white-space: nowrap;
-    font-size: 9.5px; color: #cdefff;
-  }
-  .tag i { display: block; font-style: normal; color: #7d8794; font-size: 8.5px; margin-top: 1px; }
-
-  /* ---------- 四视图 ---------- */
-  #vpLabels { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 3; }
-  #vpLabels .vp {
-    position: absolute; font-size: 9.5px; letter-spacing: 0.16em; color: #67707c;
-    text-transform: uppercase; padding: 10px 0 0 12px;
-  }
-  #vpLabels .frame { position: absolute; width: 50%; height: 50%; border: 1px solid rgba(255,255,255,0.05); }
-
-  /* ---------- 载入 / 出错 ---------- */
   #boot {
     position: fixed; inset: 0; display: grid; place-items: center;
     background: var(--bg); z-index: 30; transition: opacity .45s;
@@ -228,97 +193,79 @@
 </style>
 </head>
 <body>
-<div id="stage"><canvas id="gl"></canvas></div>
+<div id="stage"></div>
 
 <header>
   <div class="brand">
-    <h1>Microduck <em>·</em> 器件装配与连线图</h1>
-    <p>15 个舵机 · 55 个插座 · 216 个引脚 · 逐脚网表</p>
+    <h1>Microduck <em>·</em> 器件接线图</h1>
+    <p>板子摊开画 · 插座与针脚按实物 · 15 个舵机 · 逐脚网表</p>
   </div>
-  <div id="stat">正在统计…</div>
+  <div id="stat">正在布线…</div>
   <a class="back" href="./shell.html">外观 / 3D 打印 →</a>
 </header>
 
 <div id="panel">
   <div>
-    <div class="lbl">分组</div>
-    <div class="row" id="cats"></div>
+    <div class="lbl">总线</div>
+    <div id="legend"></div>
   </div>
   <div>
-    <div class="lbl">视角</div>
-    <div class="row" id="views"></div>
-  </div>
-  <div>
-    <div class="lbl">显示</div>
+    <div class="lbl">视图</div>
     <div class="row">
-      <button id="btnMulti">四视图</button>
-      <button id="btnGhost" class="on">外壳参照</button>
-      <button id="btnHarness" class="on">线束</button>
-      <button id="btnPins" class="on">引脚号</button>
-      <button id="btnMarks">标注</button>
-      <button id="btnSpin">自动旋转</button>
+      <button id="btnFit">全图</button>
+      <button id="btnZoomIn">放大</button>
+      <button id="btnZoomOut">缩小</button>
+    </div>
+    <div class="row" style="margin-top: 5px">
+      <button id="btnNums">脚号</button>
+      <button id="btnDim" class="on">压暗</button>
     </div>
   </div>
-  <div style="font-size: 10px; color: #5f6773; line-height: 1.75">
-    点插座 → 右下角近摄出引脚号<br />
-    点线束 → 高亮并给出起止脚<br />
-    拖拽旋转 · 滚轮缩放 · 双击复位
+  <div style="font-size: 10px; color: #5f6773; line-height: 1.8">
+    拖拽平移 · 滚轮缩放 · 双击回全图<br />
+    点插座看引脚 · 点线看两端<br />
+    点总线色条只留那一路
   </div>
 </div>
 
 <div id="side">
   <div class="tabs">
-    <button id="tDev" class="on">器件与引脚</button>
-    <button id="tNet">网表</button>
+    <button id="tDev" class="on">引脚</button>
+    <button id="tBom">BOM</button>
   </div>
-
   <div class="pane" id="paneDev">
     <div class="pane-head" id="pinHead">引脚表</div>
-    <div class="scroll" id="pinTable" style="max-height: 38%"></div>
-    <div class="pane-head">器件清单 <s id="devCount"></s></div>
-    <div class="scroll" id="devList"></div>
+    <div class="scroll" id="pinBody"></div>
+    <div id="netInfo"></div>
   </div>
-
-  <div class="pane" id="paneNet" style="display: none">
-    <div class="pane-head">BOM <s>型号 / 数量 / 引脚</s></div>
-    <div class="scroll" style="max-height: 40%">
+  <div class="pane" id="paneBom" style="display:none">
+    <div class="pane-head">BOM <s>型号 / 数量 / 引脚 / 插座</s></div>
+    <div class="scroll">
       <table>
         <thead><tr><th>器件</th><th>数量</th><th>脚</th><th>插座</th></tr></thead>
         <tbody id="bomBody"></tbody>
       </table>
-    </div>
-    <div class="pane-head">网表 <s id="netCount">见底部</s></div>
-    <div class="scroll" style="padding: 9px 12px; font-size: 10px; color: #5f6773; line-height: 1.8">
-      逐脚网表在页面底部那条，可以过滤、可以点。<br />
-      这里只放 BOM —— 器件的型号、数量、引脚数、挂在哪几个插座上。
     </div>
   </div>
 </div>
 
 <div id="net">
   <div class="hd">
-    <b>逐脚网表</b><span>点一行跳到起点插座</span>
+    <b>逐脚网表</b><span>点一行在图上高亮</span><s id="netCount"></s>
     <input id="netFilter" placeholder="过滤：I2C / SIG / CAM…" />
   </div>
   <div id="netTable"></div>
 </div>
 
-<div id="insetFrame"><div id="insetTitle"></div></div>
-<div id="pinLabels"></div>
 <div id="tip"></div>
-<div id="marks"></div>
-<div id="vpLabels"></div>
 
 <div id="boot">
   <div style="text-align:center">
-    <div>正在装配器件与线束…</div>
+    <div>正在摆放器件与布线…</div>
     <div class="bar"><i></i></div>
   </div>
 </div>
 
-<script type="importmap">
-{ "imports": { "three": "./vendor/three/three.module.js" } }
-</script>
 <script type="module" src="./src/internals.js"></script>
 <script>
   setTimeout(function () {
@@ -331,7 +278,7 @@
       '在仓库根目录执行：<br><code>node microduck/serve.mjs</code><br><br>' +
       '然后打开 <code>http://localhost:8099/internals.html</code>。' +
       '</div>';
-  }, 2400);
+  }, 3000);
 </script>
 </body>
 </html>

@@ -12,15 +12,9 @@
  * 颜色与 3D 线束一一对应：在 3D 里看到一根青线，这里就知道是哪一路。
  * ==================================================================== */
 
-export const BUS_TYPES = {
-  power: { name: '电源', color: '#ff6b3d' },
-  bus: { name: '舵机总线 UART', color: '#4fd8ff' },
-  cam: { name: '视频 MIPI CSI-2', color: '#c48bff' },
-  i2c: { name: 'I2C 传感', color: '#6ef2a6' },
-  aud: { name: '音频 I2S', color: '#ffd24a' },
-  gpio: { name: 'GPIO', color: '#9aa1ac' },
-  rf: { name: '无线', color: '#7fd4ff' },
-};
+import { BUS_TYPES } from './bus.js';
+
+export { BUS_TYPES };
 
 /* 画布 900×620。三块：左器件区、中间主控带、右器件区。 */
 export const GEO = {

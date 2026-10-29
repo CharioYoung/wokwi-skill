@@ -19,139 +19,11 @@
  *                 摄像头的地全连成一条横穿机身的线，既不真实也没法看。
  * ==================================================================== */
 
-/* ---------- 连接器型号 ---------- */
-/* pitch 单位是厘米（本工程 1 unit = 1 cm），所以 2.54 mm = 0.254。 */
-export const CONN_TYPES = {
-  XH254: { name: 'XH2.54', pitch: 0.254, h: 0.62, w: 0.52, body: '#e9e3d5', pins: '#d8b25e' },
-  PH20: { name: 'PH2.0', pitch: 0.200, h: 0.46, w: 0.44, body: '#efe9dc', pins: '#d8b25e' },
-  GH125: { name: 'GH1.25', pitch: 0.125, h: 0.34, w: 0.32, body: '#f2eee4', pins: '#d8b25e' },
-  ZH15: { name: 'ZH1.5', pitch: 0.150, h: 0.38, w: 0.34, body: '#f2eee4', pins: '#d8b25e' },
-  FPC05: { name: 'FPC 0.5-24P', pitch: 0.050, h: 0.16, w: 0.30, body: '#c9a24d', pins: '#e8c877' },
-  BTN: { name: '电池触点', pitch: 0.900, h: 0.12, w: 0.60, body: '#b87333', pins: '#ffd28a' },
-  IPEX: { name: 'IPEX MHF4', pitch: 0.000, h: 0.16, w: 0.28, body: '#c9ced6', pins: '#e9eef6' },
-};
+/* 连接器与网名的数据在 hardware.js —— 3D 线束、2D 接线图、校验脚本
+ * 读的都是那一份。这里只负责把它们摆到 3D 器件表面上、连出实体线。 */
+import { CONN_TYPES, DEVICES, SERVO_DEVICE, CONNECTORS, netBus, splitNet, connectorDefs } from './hardware.js';
 
-/* ---------- 器件清单 ----------
- * mesh 是 model.js 里那件网格的名字，连接器与容纳检查都靠它定位。
- * wt / spec 进 BOM 表，不做几何用。 */
-export const DEVICES = [
-  { id: 'mb', label: 'RK3566 主控板', mesh: 'mb', cat: '计算', qty: 1, wt: 14, spec: '84×56 mm · 四核 A55 · 2/4 GB' },
-  { id: 'powerBoard', label: '电源分配板', mesh: 'powerBoard', cat: '电源', qty: 1, wt: 9, spec: '7.2 V → 5 V / 3.3 V / 6 V · 保险 · 电量计' },
-  { id: 'servoBoard', label: '舵机总线板', mesh: 'servoBoard', cat: '驱动', qty: 1, wt: 7, spec: '16 路 · UART 1 Mbps · 50 Hz 广播' },
-  { id: 'imuA', label: 'IMU-A（主控旁）', mesh: 'imuA', cat: '传感', qty: 1, wt: 1, spec: '6 轴 · I2C 0x68' },
-  { id: 'imuB', label: 'IMU-B（近地）', mesh: 'imuB', cat: '传感', qty: 1, wt: 1, spec: '6 轴 · I2C 0x69' },
-  { id: 'nfcL', label: 'NFC 读卡器（左）', mesh: 'nfcReader-1', cat: '传感', qty: 1, wt: 2, spec: '13.56 MHz · I2C' },
-  { id: 'nfcR', label: 'NFC 读卡器（右）', mesh: 'nfcReader1', cat: '传感', qty: 1, wt: 2, spec: '13.56 MHz · I2C' },
-  { id: 'micL', label: 'MEMS 麦克风（左）', mesh: 'micUnit-1', cat: '音频', qty: 1, wt: 1, spec: 'I2S · 63 dB SNR' },
-  { id: 'micR', label: 'MEMS 麦克风（右）', mesh: 'micUnit1', cat: '音频', qty: 1, wt: 1, spec: 'I2S · 63 dB SNR' },
-  { id: 'speaker', label: '扬声器 8 Ω 2 W', mesh: 'speakerUnit', cat: '音频', qty: 1, wt: 11, spec: 'Ø34 mm · 朝前' },
-  { id: 'cam', label: '摄像头模组', mesh: 'camModule', cat: '视觉', qty: 1, wt: 3, spec: '4.2 mm 广角 · FPC 24P' },
-  { id: 'lidar', label: 'LiDAR 模组', mesh: 'lidarModule', cat: '视觉', qty: 1, wt: 5, spec: 'dToF 转鼓 · UART' },
-  { id: 'battery', label: 'NP-F550 电池', mesh: 'batteryPack', cat: '电源', qty: 1, wt: 78, spec: '7.2 V 2600 mAh · 可拆' },
-];
-
-/* 舵机单列一行，qty 15，重量按 9 g 级算 */
-export const SERVO_DEVICE = {
-  id: 'servo', label: '关节舵机', cat: '驱动', qty: 15, wt: 9,
-  spec: '磁编码 · 串行总线 · 3P 插头',
-};
-
-/* ---------- 连接器 ----------
- * edge  : 贴在器件包围盒的哪个面上（'+x' / '-x' / '+y' / '-y' / '+z' / '-z'）
- * along : 沿该面的切向偏移（±z 面切向是 x，±x 面切向是 z），单位 cm
- * lift  : 额外离开表面多少，默认 0
- * pins  : 网名数组，下标 +1 就是脚号
- */
-export const CONNECTORS = [
-  /* ---- 主控板：九个口，按"后-右-前-左"排一圈 ---- */
-  { id: 'J1', dev: 'mb', label: '电池输入', type: 'XH254', edge: '-z', along: -2.6,
-    pins: ['VBAT:power', 'GND:power'] },
-  { id: 'J2', dev: 'mb', label: '舵机总线', type: 'GH125', edge: '+x', along: 0.4,
-    pins: ['SERVO_TX', 'SERVO_RX', 'SERVO_EN', 'GND:bus'] },
-  { id: 'J3', dev: 'mb', label: '摄像头 FPC', type: 'FPC05', edge: '+z', along: -1.6,
-    pins: ['CAM_D0', 'CAM_D1', 'CAM_D2', 'CAM_D3', 'CAM_D4', 'CAM_D5', 'CAM_D6', 'CAM_D7',
-      'CAM_CLK', 'CAM_VS', 'CAM_HS', 'CAM_MCLK', 'CAM_PWDN', 'CAM_RST', 'CAM_SCL', 'CAM_SDA',
-      'CAM_3V3', 'CAM_1V8', 'CAM_2V8', 'CAM_AF', 'CAM_GND1:cam', 'CAM_GND2:cam',
-      'CAM_GND3:cam', 'CAM_SHIELD:cam'] },
-  { id: 'J4', dev: 'mb', label: 'LiDAR', type: 'GH125', edge: '+z', along: 2.6,
-    pins: ['LIDAR_TX', 'LIDAR_RX', 'LIDAR_3V3', 'GND:i2c'] },
-  { id: 'J5', dev: 'mb', label: 'I2C 扩展', type: 'PH20', edge: '-x', along: 1.2,
-    pins: ['I2C_3V3', 'GND:i2c', 'I2C_SCL', 'I2C_SDA'] },
-  { id: 'J6', dev: 'mb', label: 'I2S 音频', type: 'PH20', edge: '+x', along: -1.9,
-    pins: ['I2S_BCLK', 'I2S_LRCK', 'I2S_DIN', 'I2S_DOUT', 'AUD_3V3', 'GND:aud'] },
-  { id: 'J7', dev: 'mb', label: 'NFC 控制', type: 'PH20', edge: '-x', along: -0.6,
-    pins: ['NFC_3V3', 'GND:i2c', 'NFC_IRQ', 'NFC_RST'] },
-  { id: 'J8', dev: 'mb', label: '状态灯', type: 'PH20', edge: '-x', along: 2.0,
-    pins: ['LED_5V', 'GND:gpio', 'LED_DIN', 'LED_CIN'] },
-  { id: 'J9', dev: 'mb', label: 'Wi-Fi 天线', type: 'IPEX', edge: '-z', along: 2.8,
-    pins: ['WIFI_ANT'] },
-
-  /* ---- 电源分配板 ---- */
-  { id: 'P1', dev: 'powerBoard', label: '电池进', type: 'XH254', edge: '-z', along: -1.6,
-    pins: ['VBAT:power', 'GND:power'] },
-  { id: 'P2', dev: 'powerBoard', label: '主控出', type: 'XH254', edge: '+z', along: -1.6,
-    pins: ['VBAT_SW:power', 'GND:power'] },
-  { id: 'P3', dev: 'powerBoard', label: '舵机 6 V', type: 'XH254', edge: '+x', along: 1.0,
-    pins: ['VSERVO:power', 'GND:power'] },
-  { id: 'P4', dev: 'powerBoard', label: '风扇 5 V', type: 'PH20', edge: '-x', along: 0.8,
-    pins: ['FAN_5V', 'GND:power'] },
-
-  /* ---- 舵机总线板 ---- */
-  { id: 'S0', dev: 'servoBoard', label: '舵机电源', type: 'XH254', edge: '-x', along: -0.8,
-    pins: ['VSERVO:power', 'GND:power'] },
-  { id: 'S1', dev: 'servoBoard', label: 'UART 入', type: 'ZH15', edge: '+x', along: 0.6,
-    pins: ['SERVO_TX', 'SERVO_RX', 'GND:bus'] },
-
-  /* ---- 传感 / 音频 ---- */
-  { id: 'I1', dev: 'imuA', label: 'IMU-A', type: 'GH125', edge: '-z', along: 0,
-    pins: ['I2C_3V3', 'GND:i2c', 'I2C_SCL', 'I2C_SDA'] },
-  { id: 'I2', dev: 'imuB', label: 'IMU-B', type: 'GH125', edge: '-z', along: 0,
-    pins: ['I2C_3V3', 'GND:i2c', 'I2C_SCL', 'I2C_SDA'] },
-  { id: 'N1', dev: 'nfcL', label: 'NFC 左', type: 'PH20', edge: '-z', along: 0,
-    pins: ['NFC_3V3', 'GND:i2c', 'I2C_SCL', 'I2C_SDA', 'NFC_IRQ', 'NFC_RST'] },
-  { id: 'N2', dev: 'nfcR', label: 'NFC 右', type: 'PH20', edge: '-z', along: 0,
-    pins: ['NFC_3V3', 'GND:i2c', 'I2C_SCL', 'I2C_SDA', 'NFC_IRQ', 'NFC_RST'] },
-  { id: 'K1', dev: 'speaker', label: '扬声器', type: 'PH20', edge: '-z', along: 1.2,
-    pins: ['I2S_DOUT', 'GND:aud'] },
-  { id: 'M1', dev: 'micL', label: '麦克风左', type: 'GH125', edge: '-z', along: 0,
-    pins: ['I2S_BCLK', 'I2S_LRCK', 'I2S_DIN', 'GND:aud'] },
-  { id: 'M2', dev: 'micR', label: '麦克风右', type: 'GH125', edge: '-z', along: 0,
-    pins: ['I2S_BCLK', 'I2S_LRCK', 'I2S_DIN', 'GND:aud'] },
-
-  /* ---- 头内 ---- */
-  { id: 'C1', dev: 'cam', label: '摄像头 FPC', type: 'FPC05', edge: '-z', along: 0,
-    pins: ['CAM_D0', 'CAM_D1', 'CAM_D2', 'CAM_D3', 'CAM_D4', 'CAM_D5', 'CAM_D6', 'CAM_D7',
-      'CAM_CLK', 'CAM_VS', 'CAM_HS', 'CAM_MCLK', 'CAM_PWDN', 'CAM_RST', 'CAM_SCL', 'CAM_SDA',
-      'CAM_3V3', 'CAM_1V8', 'CAM_2V8', 'CAM_AF', 'CAM_GND1:cam', 'CAM_GND2:cam',
-      'CAM_GND3:cam', 'CAM_SHIELD:cam'] },
-  { id: 'C2', dev: 'lidar', label: 'LiDAR', type: 'GH125', edge: '-z', along: 0,
-    pins: ['LIDAR_TX', 'LIDAR_RX', 'LIDAR_3V3', 'GND:i2c'] },
-
-  /* ---- 电池 ---- */
-  { id: 'B1', dev: 'battery', label: '电池触点', type: 'BTN', edge: '+z', along: 0,
-    pins: ['VBAT:power', 'GND:power'] },
-];
-
-/* ---------- 总线分类：线束颜色跟着它走 ---------- */
-const NET_BUS = [
-  [/^(VBAT|VSERVO|FAN_|VBAT_SW|GND:power)/, 'power'],
-  [/^(SERVO_|SIG_)/, 'bus'],
-  [/^CAM_/, 'cam'],
-  [/^(I2C_|LIDAR_)/, 'i2c'],
-  [/^(I2S_|AUD_|MIC_)/, 'aud'],
-  [/^(LED_|NFC_)/, 'gpio'],
-  [/^WIFI_/, 'rf'],
-];
-export function netBus(net) {
-  for (const [re, bus] of NET_BUS) if (re.test(net)) return bus;
-  return 'gpio';
-}
-
-/* 网名拆成"显示名 + 域"：GND:power → { label:'GND', domain:'power' } */
-function splitNet(raw) {
-  const i = raw.indexOf(':');
-  return i < 0 ? { label: raw, domain: '' } : { label: raw.slice(0, i), domain: raw.slice(i + 1) };
-}
+export { CONN_TYPES, DEVICES, SERVO_DEVICE, CONNECTORS, netBus, splitNet };
 
 /* ---------- 从器件包围盒推连接器位姿 ---------- */
 
@@ -208,26 +80,9 @@ export function buildPinout(THREE, duck) {
     return b;
   };
 
-  /* 舵机与舵机板的口是批量生成的：15 个舵机 + 一块 16 口的总线板，
-   * 手写 30 个连接器必然写错一个脚号，所以按 servoJoints 的顺序生成。 */
-  const all = CONNECTORS.slice();
+  /* 手写的 + 按关节生成的（15 个舵机 + 16 口总线板） */
   const joints = duck.dof.servoJoints || [];
-  joints.forEach((s, i) => {
-    const net = 'SIG_' + s.id.toUpperCase();
-    const front = i < 8;
-    all.push({
-      id: 'S' + (2 + i), dev: 'servoBoard', label: `${i + 1} ${s.joint}`,
-      type: 'ZH15', edge: front ? '+z' : '-z',
-      along: front ? -1.6 + i * 0.5 : 1.6 - (i - 8) * 0.5,
-      pins: ['#VSERVO', '#GND', net],
-    });
-    // 舵机的插座直接贴在自己的圆柱壳上，mesh 就是那根舵机
-    all.push({
-      id: 'JS' + (i + 1), dev: 'servo', mesh: s.servo, label: `${i + 1} ${s.joint}`,
-      type: 'ZH15', edge: '-z', along: 0,
-      pins: ['#VSERVO', '#GND', net],
-    });
-  });
+  const all = connectorDefs(joints);
 
   const group = new THREE.Group();
   group.name = 'pinout';

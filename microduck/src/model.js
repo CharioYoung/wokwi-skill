@@ -16,6 +16,8 @@
  *                                                    = 15
  * ==================================================================== */
 
+import { SERVO_JOINTS } from './joints.js';
+
 const DEG = Math.PI / 180;
 
 /* 整机比例。改这里就能整体调体型，别去散着改下面每个零件。 */
@@ -652,26 +654,9 @@ export function buildMicroduck(THREE, opts) {
     { id: 'lidarIn', label: 'LiDAR 模组', note: '额头内，转鼓朝前', anchor: new THREE.Vector3(0, 24.05, 2.3) },
   ];
 
-  /* 15 个舵机，按关节登记。内部图、引脚表、校验脚本都从这里数，
-   * 而不是各自再抄一遍名字 —— 否则很容易出现"页面写 15、模型只有 11"。
-   * servo 是场景里那根圆柱网格的名字，pins.js 靠它定位连接器。 */
-  const servoJoints = [];
-  ['L', 'R'].forEach((k) => {
-    servoJoints.push(
-      { id: 'hipYaw' + k, servo: 'hipYawServo' + k, joint: '髋偏航', group: '腿' },
-      { id: 'hipPitch' + k, servo: 'hipServo' + k, joint: '髋俯仰', group: '腿' },
-      { id: 'knee' + k, servo: 'kneeServo' + k, joint: '膝', group: '腿' },
-      { id: 'anklePitch' + k, servo: 'anklePitchServo' + k, joint: '踝俯仰', group: '腿' },
-      { id: 'ankleRoll' + k, servo: 'ankleRollServo' + k, joint: '踝侧倾', group: '腿' },
-    );
-  });
-  servoJoints.push(
-    { id: 'neckYaw', servo: 'neckServoY', joint: '颈偏航', group: '颈' },
-    { id: 'neckPitch', servo: 'neckServoP', joint: '颈俯仰', group: '颈' },
-    { id: 'headPitch', servo: 'headServo', joint: '头俯仰', group: '头' },
-    { id: 'beakUpper', servo: 'beakServoU', joint: '上颚', group: '喙' },
-    { id: 'beakLower', servo: 'beakServoL', joint: '下颚', group: '喙' },
-  );
+  /* 15 个舵机由 joints.js 定义：模型只管把它们摆到位置上，
+   * 名字不在第二处重复，引脚表与接线图读的是同一张表。 */
+  const servoJoints = SERVO_JOINTS;
 
   const dof = {
     bodyPivot, torso, neckPivot, head, beakUpper, beakLower,

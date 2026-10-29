@@ -14,6 +14,7 @@ const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 const pages = [
   { html: '../internals.html', js: '../src/internals.js' },
   { html: '../shell.html', js: '../src/shell.js' },
+  { html: '../review.html', js: '../src/app.js' },
 ];
 
 let bad = 0;
@@ -62,6 +63,7 @@ for (const p of pages) {
   const used = [...new Set([...js.matchAll(/THREE\.([A-Za-z0-9_]+)/g)].map((x) => x[1]))];
   const missApi = used.filter((n) => THREE[n] === undefined);
   if (missApi.length) fail('three 里没有：' + missApi.join(', '));
+  else if (!used.length) console.log('  不依赖 three');
   else console.log('  %d 个 THREE API 都存在', used.length);
 }
 
